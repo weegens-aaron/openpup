@@ -1372,6 +1372,7 @@ source = { editable = "." }
 dependencies = [
     { name = "code-puppy" },
     { name = "httpx" },
+    { name = "prompt-toolkit" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
@@ -1426,6 +1427,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.24.1" },
     { name = "imap-tools", marker = "extra == 'all'", specifier = ">=1.5.0" },
     { name = "imap-tools", marker = "extra == 'email'", specifier = ">=1.5.0" },
+    { name = "prompt-toolkit", specifier = ">=3.0.52" },
     { name = "pydantic", specifier = ">=2.4.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },

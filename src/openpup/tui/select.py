@@ -9,8 +9,7 @@ import html
 import sys
 from typing import Callable, List, Optional
 
-from prompt_toolkit import Application
-from prompt_toolkit import prompt as pt_prompt
+from prompt_toolkit import Application, PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout, Window
@@ -97,15 +96,19 @@ async def arrow_select_async(
     return result[0]
 
 
-def prompt_text(message: str, default: str = "", is_password: bool = False) -> Optional[str]:
-    """Single-line text input. Returns the string, or None on Ctrl-C."""
+async def prompt_text(message: str, default: str = "", is_password: bool = False) -> Optional[str]:
+    """Single-line text input. Returns the string, or None on Ctrl-C/Esc.
+
+    Async because the config menu runs inside a live event loop -- the
+    synchronous ``prompt()`` would call ``asyncio.run()`` and blow up.
+    """
+    session: PromptSession = PromptSession()
     try:
-        value = pt_prompt(
+        return await session.prompt_async(
             HTML(f"<ansicyan>{html.escape(message)}</ansicyan> "),
             default=default or "",
             is_password=is_password,
         )
-        return value
     except (KeyboardInterrupt, EOFError):
         return None
 

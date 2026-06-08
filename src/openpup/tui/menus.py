@@ -188,7 +188,7 @@ async def _edit_field(store: EnvStore, fld: Field) -> None:
         if picked == options[0]:
             store.set(fld.key, "")
         elif picked == options[1]:
-            value = prompt_text(f"{fld.label}:", default=store.get(fld.key))
+            value = await prompt_text(f"{fld.label}:", default=store.get(fld.key))
             if value is not None:
                 store.set(fld.key, value.strip())
         else:
@@ -198,7 +198,7 @@ async def _edit_field(store: EnvStore, fld: Field) -> None:
     # text / secret / number -> text prompt
     is_secret = fld.kind == "secret"
     hint = f"{fld.label}" + (f"  [{fld.help}]" if fld.help else "")
-    value = prompt_text(
+    value = await prompt_text(
         f"{hint}:", default="" if is_secret else store.get(fld.key), is_password=is_secret
     )
     if value is not None:
@@ -207,14 +207,18 @@ async def _edit_field(store: EnvStore, fld: Field) -> None:
 
 async def _edit_behaviors(store: EnvStore, fld: Field) -> None:
     selected = set(b.strip() for b in store.get(fld.key).split(",") if b.strip())
+    cursor = 0
     while True:
         rows = [f"[{'x' if b in selected else ' '}] {b}" for b in HEARTBEAT_BEHAVIORS]
         rows.append("Done")
         picked = await arrow_select_async(
-            "Toggle heartbeat behaviors (Enter to toggle, choose Done to finish)", rows
+            "Toggle heartbeat behaviors (Enter to toggle, choose Done to finish)",
+            rows,
+            start_index=cursor,
         )
         if picked is None or picked == "Done":
             break
+        cursor = rows.index(picked)
         name = picked.split("] ", 1)[1]
         if name in selected:
             selected.discard(name)
@@ -225,6 +229,7 @@ async def _edit_behaviors(store: EnvStore, fld: Field) -> None:
 
 
 async def _section_menu(store: EnvStore, section: Section) -> None:
+    cursor = 0
     while True:
         labels = [f"{f.label:<24} {_display_value(store, f)}" for f in section.fields]
         labels.append("<- Back")
@@ -235,10 +240,13 @@ async def _section_menu(store: EnvStore, section: Section) -> None:
                 return f.help or f"Set {f.key}"
             return "Return to the main menu"
 
-        picked = await arrow_select_async(f"{section.title}", labels, preview_callback=preview)
+        picked = await arrow_select_async(
+            f"{section.title}", labels, preview_callback=preview, start_index=cursor
+        )
         if picked is None or picked == "<- Back":
             return
         idx = labels.index(picked)
+        cursor = idx
         await _edit_field(store, section.fields[idx])
 
 
@@ -247,6 +255,7 @@ async def run_config_menu(env_path: Optional[Path] = None) -> None:
     path = default_env_path(env_path)
     store = EnvStore(path)
     dirty = False
+    cursor = 0
 
     while True:
         options = [s.title for s in SCHEMA]
@@ -265,7 +274,10 @@ async def run_config_menu(env_path: Optional[Path] = None) -> None:
             return ""
 
         picked = await arrow_select_async(
-            f"OpenPup configuration  ({path})", options, preview_callback=preview
+            f"OpenPup configuration  ({path})",
+            options,
+            preview_callback=preview,
+            start_index=cursor,
         )
         if picked is None or picked == "Exit without saving":
             if dirty:
@@ -276,6 +288,7 @@ async def run_config_menu(env_path: Optional[Path] = None) -> None:
             console.print(f"[green]Saved configuration to {path}[/green]")
             return
 
-        section = SCHEMA[options.index(picked)]
+        cursor = options.index(picked)
+        section = SCHEMA[cursor]
         await _section_menu(store, section)
         dirty = True
