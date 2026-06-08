@@ -59,6 +59,19 @@ def run(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
 
 
 @app.command()
+def setup(
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="Path to the .env to write."),
+) -> None:
+    """On-rails guided setup: get + validate credentials for each platform."""
+    from pathlib import Path
+
+    from openpup.setup import run_setup_wizard
+
+    path = Path(env_file) if env_file else None
+    asyncio.run(run_setup_wizard(path))
+
+
+@app.command()
 def config(
     env_file: Optional[str] = typer.Option(None, "--env-file", help="Path to the .env to edit."),
 ) -> None:
