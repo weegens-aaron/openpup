@@ -55,17 +55,48 @@ Extras: `discord`, `telegram`, `whatsapp` (uses `web`), `email`, `sms`, `web`, `
 
 ## Configure
 
+The easiest way is the **interactive TUI** (same arrow-key menu style as
+code-puppy's `/agent` and `/model_settings`):
+
 ```bash
-cp .env.example .env
-# edit .env - enable only the platforms you want
+openpup config
+```
+
+It opens a nested menu - Identity & Model, Owner & Memory, Heartbeat, and one
+section per platform plus the webhook server - with a live preview pane, secret
+masking, on/off toggles, a model picker (pulled from your code-puppy config),
+and a behaviors multi-toggle. Changes are written back to `.env`.
+
+```
+OpenPup configuration  (/path/.env)
+
+> Identity & Model
+  Owner & Memory
+  Heartbeat (consciousness)
+  Telegram
+  ...
+  Save & exit
+  Exit without saving
++- Preview ----------------------------------------+
+| 4 settings - currently on                        |
++--------------------------------------------------+
+(Up/Down or Ctrl+P/N to move, Enter to confirm, Esc to cancel)
+```
+
+Prefer editing by hand? Copy the template instead:
+
+```bash
+cp .env.example .env   # then edit
 ```
 
 You also need a working code-puppy model configuration (`~/.code_puppy`). Set
-`OPENPUP_MODEL` to pick a model, or leave it blank for code-puppy's default.
+`OPENPUP_MODEL` (or use the TUI model picker), or leave it blank for
+code-puppy's default.
 
 ## Run
 
 ```bash
+openpup config     # interactive TUI configuration menus
 openpup status     # show config + enabled platforms
 openpup run        # start the always-on companion (Ctrl-C to stop)
 ```
@@ -125,6 +156,10 @@ src/openpup/
     engine.py          # the tick loop
     scheduler.py       # routine scheduling (no cron dep)
     reflect.py outreach.py routines.py
+  tui/
+    select.py          # prompt_toolkit arrow-select + input primitives
+    env_store.py       # comment-preserving .env editor
+    menus.py           # the config menu tree
 ```
 
 ## Development

@@ -59,6 +59,19 @@ def run(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
 
 
 @app.command()
+def config(
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="Path to the .env to edit."),
+) -> None:
+    """Open the interactive TUI to configure everything (writes .env)."""
+    from pathlib import Path
+
+    from openpup.tui import run_config_menu
+
+    path = Path(env_file) if env_file else None
+    asyncio.run(run_config_menu(path))
+
+
+@app.command()
 def status() -> None:
     """Show configuration and which platforms are enabled."""
     s = get_settings()
