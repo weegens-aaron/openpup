@@ -6,9 +6,12 @@ Only started when ``OPENPUP_WEB_ENABLED=true``. Routes:
 * ``POST /webhook/whatsapp`` — inbound WhatsApp messages
 * ``POST /webhook/sms``      — inbound Twilio SMS (form-encoded)
 * ``GET  /healthz``          — liveness probe
-"""
 
-from __future__ import annotations
+Note: this module intentionally does NOT use ``from __future__ import
+annotations``. FastAPI must see the real ``Request``/``Response`` classes on
+the route signatures to inject them; stringized annotations resolved against
+module globals would fail (those names are imported in a local scope).
+"""
 
 import asyncio
 import logging

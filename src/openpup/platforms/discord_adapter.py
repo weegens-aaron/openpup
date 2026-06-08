@@ -44,18 +44,30 @@ class DiscordAdapter(PlatformAdapter):
 
         @client.event
         async def on_message(message) -> None:  # pragma: no cover - needs live gateway
-            if message.author == client.user:
-                return
-            is_dm = message.guild is None
-            mentioned = client.user in getattr(message, "mentions", [])
-            if not (is_dm or mentioned):
-                return
-            envelope = Envelope(
-                platform=self.name,
-                channel=str(message.channel.id),
-                sender=str(message.author),
-                text=message.content or "",
-            )
+            await self._handle_message(message)
+
+    def _message_to_envelope(self, message) -> Optional[Envelope]:
+        """Convert a discord Message to an Envelope, or None if it's ignorable.
+
+        Only DMs and messages that @mention the bot are accepted; the bot's
+        own messages are skipped.
+        """
+        if message.author == self._client.user:
+            return None
+        is_dm = message.guild is None
+        mentioned = self._client.user in getattr(message, "mentions", [])
+        if not (is_dm or mentioned):
+            return None
+        return Envelope(
+            platform=self.name,
+            channel=str(message.channel.id),
+            sender=str(message.author),
+            text=message.content or "",
+        )
+
+    async def _handle_message(self, message) -> None:
+        envelope = self._message_to_envelope(message)
+        if envelope is not None:
             await self.registry.dispatch_inbound(envelope)
 
     async def start(self) -> None:
