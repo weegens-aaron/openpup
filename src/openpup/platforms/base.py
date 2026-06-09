@@ -55,6 +55,7 @@ def build_enabled_adapters(settings: Settings, registry: PlatformRegistry) -> Li
         (settings.whatsapp_enabled, _build_whatsapp),
         (settings.email_enabled, _build_email),
         (settings.sms_enabled, _build_sms),
+        (settings.imessage_enabled, _build_imessage),
     ]
 
     for enabled, builder in builders:
@@ -103,3 +104,9 @@ def _build_sms(settings: Settings, registry: PlatformRegistry) -> PlatformAdapte
     from openpup.platforms.sms_adapter import SMSAdapter
 
     return SMSAdapter(settings, registry)
+
+
+def _build_imessage(settings: Settings, registry: PlatformRegistry) -> PlatformAdapter:
+    from openpup.platforms.imessage_adapter import IMessageAdapter
+
+    return IMessageAdapter(settings, registry)

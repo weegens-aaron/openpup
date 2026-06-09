@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     email_password: Optional[str] = Field(None, alias="EMAIL_PASSWORD")
     email_poll_seconds: int = Field(60, alias="EMAIL_POLL_SECONDS")
 
+    # ---- iMessage (macOS native) ----------------------------------------
+    imessage_enabled: bool = Field(False, alias="IMESSAGE_ENABLED")
+    imessage_poll_seconds: int = Field(5, alias="IMESSAGE_POLL_SECONDS")
+    imessage_db_path: str = Field("~/Library/Messages/chat.db", alias="IMESSAGE_DB_PATH")
+
     # ---- SMS -------------------------------------------------------------
     sms_enabled: bool = Field(False, alias="SMS_ENABLED")
     twilio_account_sid: Optional[str] = Field(None, alias="TWILIO_ACCOUNT_SID")

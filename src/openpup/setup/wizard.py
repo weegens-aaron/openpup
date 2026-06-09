@@ -90,6 +90,38 @@ async def _telegram_post(store: EnvStore, values: dict) -> None:
         )
 
 
+async def _imessage_post(store: EnvStore, values: dict) -> None:
+    console.print(
+        "\n[bold]What's your iMessage handle?[/bold] The phone number or email "
+        "people use to iMessage you (so OpenPup knows it's you and can text you)."
+    )
+    handle = await prompt_text("Your iMessage handle (e.g. +15559876543 or you@icloud.com):")
+    if handle and handle.strip():
+        handle = handle.strip().replace(" ", "")
+        _add_owner_address(store, f"imessage:{handle}")
+        console.print(f"[green]Owner iMessage handle set: imessage:{handle}[/green]")
+        if await confirm("Send yourself a test iMessage now?", default_yes=True):
+            import subprocess
+
+            from openpup.platforms.imessage_adapter import applescript_send
+
+            try:
+                r = subprocess.run(
+                    applescript_send(handle, "Woof! OpenPup is now wired into iMessage."),
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if r.returncode == 0:
+                    console.print(
+                        "[green]Sent! Check your phone. (Approve the Automation prompt if asked.)[/green]"
+                    )
+                else:
+                    console.print(f"[yellow]Send failed: {r.stderr.strip()}[/yellow]")
+            except Exception as exc:
+                console.print(f"[yellow]Could not send test: {exc}[/yellow]")
+
+
 async def _sms_post(store: EnvStore, values: dict) -> None:
     console.print(
         "\n[bold]What's YOUR personal mobile number?[/bold] (the one OpenPup should "
@@ -124,6 +156,27 @@ FLOWS: List[Flow] = [
         fields=[CredField("TELEGRAM_BOT_TOKEN", "Bot token", secret=True)],
         validate=lambda v: validators.validate_telegram(v["TELEGRAM_BOT_TOKEN"]),
         post_setup=_telegram_post,
+    ),
+    Flow(
+        key="imessage",
+        title="iMessage (macOS native)",
+        enable_key="IMESSAGE_ENABLED",
+        intro="Native iMessage on this Mac -- no bot, no Twilio, free. Two permission grants.",
+        steps=[
+            Step(
+                "Grant Full Disk Access to your terminal app so OpenPup can read "
+                "Messages. Toggle it ON, then fully quit + reopen the terminal.",
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+            ),
+            Step(
+                "The first time OpenPup sends, macOS asks to let it control Messages -- "
+                "click OK (Automation permission)."
+            ),
+            Step("Make sure Messages.app is signed into your iMessage account."),
+        ],
+        fields=[],
+        validate=lambda v: validators.validate_imessage(),
+        post_setup=_imessage_post,
     ),
     Flow(
         key="email",

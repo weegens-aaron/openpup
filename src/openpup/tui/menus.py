@@ -137,6 +137,14 @@ SCHEMA: List[Section] = [
         ],
     ),
     Section(
+        "iMessage (macOS)",
+        [
+            Field("IMESSAGE_ENABLED", "Enabled", "bool"),
+            Field("IMESSAGE_POLL_SECONDS", "Poll interval (seconds)", "number"),
+            Field("IMESSAGE_DB_PATH", "Messages DB path", "text"),
+        ],
+    ),
+    Section(
         "SMS (Twilio)",
         [
             Field("SMS_ENABLED", "Enabled", "bool"),

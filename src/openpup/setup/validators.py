@@ -101,6 +101,36 @@ async def validate_whatsapp(phone_number_id: str, access_token: str) -> Tuple[bo
         return False, f"Network error: {exc}"
 
 
+async def validate_imessage(db_path: str = "~/Library/Messages/chat.db") -> Tuple[bool, str]:
+    """Check macOS + Messages DB readability (Full Disk Access) + osascript."""
+    import platform
+    import shutil
+    import sqlite3
+    from pathlib import Path
+
+    def _check() -> Tuple[bool, str]:
+        if platform.system() != "Darwin":
+            return False, "iMessage is only available on macOS."
+        if not shutil.which("osascript"):
+            return False, "osascript not found (is this really macOS?)."
+        path = Path(db_path).expanduser()
+        if not path.exists():
+            return False, f"Messages database not found at {path}."
+        try:
+            conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+            conn.execute("SELECT COUNT(*) FROM message").fetchone()
+            conn.close()
+        except Exception:
+            return (
+                False,
+                "Can't read chat.db -- grant Full Disk Access to your terminal in "
+                "System Settings > Privacy & Security > Full Disk Access, then retry.",
+            )
+        return True, "macOS Messages database is readable. iMessage is ready."
+
+    return await asyncio.to_thread(_check)
+
+
 async def validate_email(
     imap_host: str, imap_port: int, username: str, password: str
 ) -> Tuple[bool, str]:

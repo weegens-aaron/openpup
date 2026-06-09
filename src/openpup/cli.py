@@ -128,6 +128,7 @@ def status() -> None:
             ("whatsapp", s.whatsapp_enabled),
             ("email", s.email_enabled),
             ("sms", s.sms_enabled),
+            ("imessage", s.imessage_enabled),
         ]
         if on
     ]

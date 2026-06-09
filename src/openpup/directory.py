@@ -147,7 +147,7 @@ class ContactDirectory:
         return any(c["platform"] == platform and c["channel"] == channel for c in self.contacts)
 
 
-_KNOWN_PLATFORMS = frozenset({"telegram", "discord", "whatsapp", "sms", "email"})
+_KNOWN_PLATFORMS = frozenset({"telegram", "discord", "whatsapp", "sms", "email", "imessage"})
 
 
 def default_contacts_path(state_dir: Path) -> Path:
