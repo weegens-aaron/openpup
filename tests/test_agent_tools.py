@@ -51,12 +51,6 @@ def test_advertise_and_registry_shape(monkeypatch):
     assert set(agent_tools.advertise_tools()) == openpup_tools
 
 
-def test_identity_prompt_mentions_openpup():
-    prompt = agent_tools.openpup_identity_prompt()
-    assert prompt and "OpenPup" in prompt
-    assert "openpup_send_message" in prompt
-
-
 @pytest.mark.asyncio
 async def test_send_message_ok(monkeypatch):
     reg = PlatformRegistry()

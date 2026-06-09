@@ -18,14 +18,21 @@ def test_advertise_excludes_uc_when_disabled(monkeypatch):
     assert "openpup_check_email" in names
 
 
-def test_identity_prompt_mentions_uc_when_enabled(monkeypatch):
-    monkeypatch.setattr(agent_tools, "_uc_enabled", lambda: True)
-    prompt = agent_tools.openpup_identity_prompt()
-    assert prompt and "universal_constructor" in prompt
-    assert "BUILD YOUR OWN TOOLS" in prompt
+def test_prompt_mentions_uc_when_enabled(monkeypatch):
+    import openpup.prompting as prompting
+
+    monkeypatch.setattr(
+        "code_puppy.config.get_universal_constructor_enabled", lambda: True, raising=False
+    )
+    block = prompting._capabilities_block()
+    assert "BUILD YOUR OWN TOOLS" in block
 
 
-def test_identity_prompt_no_uc_when_disabled(monkeypatch):
-    monkeypatch.setattr(agent_tools, "_uc_enabled", lambda: False)
-    prompt = agent_tools.openpup_identity_prompt()
-    assert prompt and "BUILD YOUR OWN TOOLS" not in prompt
+def test_prompt_no_uc_when_disabled(monkeypatch):
+    import openpup.prompting as prompting
+
+    monkeypatch.setattr(
+        "code_puppy.config.get_universal_constructor_enabled", lambda: False, raising=False
+    )
+    block = prompting._capabilities_block()
+    assert "BUILD YOUR OWN TOOLS" not in block

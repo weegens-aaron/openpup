@@ -45,14 +45,20 @@ class AgentHost:
 
         load_plugin_callbacks()
 
-        # Give the agent OpenPup's own tools + identity so it can actually use
-        # the integrations (email, messaging) instead of acting like plain
-        # code-puppy. Same hook pattern the kennel uses.
-        from openpup import agent_tools
+        # Give the agent OpenPup's own tools + a hermes-style layered identity
+        # so it actually uses its integrations and works agentically instead of
+        # acting like plain code-puppy. Same hook pattern the kennel uses.
+        from openpup import agent_tools, agentic, prompting
+
+        prompting.ensure_templates()
 
         register_callback("register_tools", agent_tools.register_tools_callback)
         register_callback("register_agent_tools", agent_tools.advertise_tools)
-        register_callback("load_prompt", agent_tools.openpup_identity_prompt)
+        # Agentic task-list (todo) tool, ported from hermes.
+        register_callback("register_tools", agentic.register_tools_callback)
+        register_callback("register_agent_tools", agentic.advertise_tools)
+        # Layered system prompt (SOUL + agentic guidance + user/memory snapshots).
+        register_callback("load_prompt", prompting.build_system_prompt)
 
         # Universal Constructor: let the agent forge its own tools at runtime.
         # This is a core code-puppy capability gated by its own config flag;
@@ -99,6 +105,11 @@ class AgentHost:
         """
         if self._agent is None:
             raise RuntimeError("AgentHost.boot() must be called before run()")
+
+        # Tell the agentic todo tool which conversation's task list is active.
+        from openpup import agentic
+
+        agentic.set_conversation(conversation)
 
         async with self._lock:
             history = self._histories.get(conversation, [])

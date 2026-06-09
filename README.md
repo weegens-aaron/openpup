@@ -116,6 +116,25 @@ openpup routine add digest "Summarize today's AI news" \
 openpup routine list
 ```
 
+## Agentic behavior & prompting (hermes-style)
+
+OpenPup ports hermes-agent's prompting and task-tracking discipline on top of
+code-puppy's tool-calling loop, so the agent plans and *finishes* multi-step
+work instead of stopping after a stub:
+
+- **Editable identity** — `~/.openpup/SOUL.md` is your pup's persona (created on
+  first run; edit it freely). `~/.openpup/USER.md` holds durable facts about you.
+- **Layered system prompt** — SOUL identity -> capabilities -> agentic guidance
+  ("take action, don't describe it"; "finish the job, never fabricate output";
+  memory discipline) -> user profile -> recent-memory snapshot -> timestamp.
+- **Task list tool** — `openpup_todo` (ported from hermes) lets the agent
+  decompose a request into a plan and work it top-to-bottom, one item
+  `in_progress` at a time. Per-conversation, so chats don't share a list.
+
+What's intentionally *not* copied: hermes's own run-loop (code-puppy already has
+one) and heavyweight subsystems (kanban/browser/tts). OpenPup's heartbeat +
+routines cover recurring autonomous work.
+
 ## Access control (owner + allowlists)
 
 OpenPup distinguishes **you (the owner)** from anyone else who messages the bot.

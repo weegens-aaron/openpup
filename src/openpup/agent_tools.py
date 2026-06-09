@@ -171,37 +171,3 @@ def _uc_enabled() -> bool:
         return bool(get_universal_constructor_enabled())
     except Exception:
         return False
-
-
-def openpup_identity_prompt() -> Optional[str]:
-    """``load_prompt`` hook — tell the agent it's OpenPup and what it can do."""
-    try:
-        from openpup.config import get_settings
-
-        reg = get_registry()
-        settings = get_settings()
-        platforms = reg.platforms()
-        platform_str = ", ".join(platforms) if platforms else "none yet"
-        owner = settings.owner_address or "unknown"
-        return (
-            f"\n\n# You are {settings.name}, an always-on AI companion (OpenPup).\n"
-            "You run continuously and can reach your human through real messaging "
-            "platforms. You are NOT limited to coding — you are a helpful companion.\n"
-            f"Connected platforms: {platform_str}. Owner address: {owner}.\n"
-            "You have these OpenPup tools:\n"
-            "- openpup_list_platforms(): see what's connected and the owner's address.\n"
-            "- openpup_check_email(limit): read recent emails (only if email is connected).\n"
-            "- openpup_send_message(address, text): message someone at 'platform:channel'.\n"
-            + (
-                "- universal_constructor(action, ...): BUILD YOUR OWN TOOLS in Python at "
-                "runtime (action=create/call/list/update/info). If you lack a capability, "
-                "construct it instead of refusing.\n"
-                if _uc_enabled()
-                else ""
-            )
-            + "When the user asks you to check email or message someone, USE these tools "
-            "instead of saying you can't. If a platform isn't connected, say so plainly "
-            "and suggest running 'openpup setup'."
-        )
-    except Exception:
-        return None
