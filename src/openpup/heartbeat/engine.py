@@ -11,7 +11,7 @@ from typing import Optional
 from openpup.agent_host import AgentHost
 from openpup.config import Settings
 from openpup.heartbeat import outreach, reflect, routines
-from openpup.heartbeat.scheduler import Scheduler
+from openpup.heartbeat.scheduler import Scheduler, get_scheduler
 from openpup.messaging.registry import PlatformRegistry
 
 logger = logging.getLogger("openpup.heartbeat")
@@ -30,7 +30,8 @@ class Heartbeat:
         self.host = host
         self.settings = settings
         self.registry = registry
-        self.scheduler = scheduler or Scheduler.load(settings.state_dir / "routines.json")
+        # Shared singleton so jobs the agent schedules are picked up live.
+        self.scheduler = scheduler or get_scheduler()
         self._task: Optional[asyncio.Task] = None
         self._stop = asyncio.Event()
         self.tick_count = 0

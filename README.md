@@ -164,6 +164,29 @@ from hermes-agent:
 This complements inbound access control: `access.py` governs who may talk to
 OpenPup; `governance.py` governs who OpenPup may message, and how fast.
 
+## Scheduler & reminders
+
+OpenPup has a built-in scheduler (no cron dependency) that the heartbeat drives.
+Jobs fire either a **reminder** (plain text delivered verbatim) or a **task** (an
+agent prompt whose output is delivered), on one of:
+
+- **one-shot**: `--in <seconds>` or `--at <ISO datetime>` (fires once, then removed)
+- **recurring**: `--every <seconds>` or `--daily HH:MM`
+
+```bash
+openpup routine add coffee  --message "go get coffee" --in 3600
+openpup routine add standup --message "daily standup!" --daily 09:00 --deliver telegram:123
+openpup routine add digest  --prompt "Summarize today's AI news" --daily 08:00
+openpup routine list
+openpup routine rm coffee
+```
+
+**The agent can schedule things itself** (owner-only) via bound tools:
+`openpup_schedule(...)`, `openpup_list_schedules()`, `openpup_cancel_schedule(name)`.
+So "remind me to call mom in 2 hours" or "every morning text me the weather" just
+work — delivery defaults to the owner and resolves contact names. The agent and
+the heartbeat share one scheduler, so jobs the pup sets fire live.
+
 ## Access control (owner + allowlists)
 
 OpenPup distinguishes **you (the owner)** from anyone else who messages the bot.
@@ -198,7 +221,7 @@ Configured via `OPENPUP_HEARTBEAT_BEHAVIORS` (comma-separated):
 |------------|--------------|
 | `reflect`  | Reads recent memory, writes a short private reflection back to memory. |
 | `outreach` | Decides whether to message you unprompted. Guard-railed: quiet hours + daily cap + the agent must explicitly opt in. |
-| `routines` | Runs due scheduled tasks and delivers their output (with a `[SILENT]` no-spam escape hatch). |
+| `routines` | Runs due scheduled jobs (reminders + tasks) and delivers them (with a `[SILENT]` no-spam escape hatch). |
 | `inbound`  | Polls poll-based adapters (e.g. email IMAP) for new messages. |
 
 Tuning knobs (see `.env.example`): `OPENPUP_HEARTBEAT_INTERVAL`,

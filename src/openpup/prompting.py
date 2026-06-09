@@ -274,6 +274,8 @@ def _capabilities_block() -> str:
             "- openpup_send_message(address, text): message a platform:channel or a known",
             "  contact name; owner-only, rate-limited, policy-governed.",
             "- openpup_todo(...): your task list for multi-step work.",
+            "- openpup_schedule(...): set reminders / recurring jobs (delay_seconds, at,",
+            "  every_seconds, or daily); openpup_list_schedules / openpup_cancel_schedule.",
         ]
         try:
             from code_puppy.config import get_universal_constructor_enabled

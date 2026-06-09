@@ -54,10 +54,15 @@ def test_advertise_and_registry_shape(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_send_message_ok(monkeypatch):
+    import openpup.governance as governance_mod
+    from openpup.governance import SendPolicy
+
     reg = PlatformRegistry()
     adapter = FakeAdapter("telegram")
     reg.register(adapter)
     monkeypatch.setattr(agent_tools, "get_registry", lambda: reg)
+    # Isolate from the real .env send policy.
+    monkeypatch.setattr(governance_mod, "get_send_policy", lambda: SendPolicy(per_minute=100))
 
     agent = FakeAgent()
     agent_tools.register_send_message(agent)

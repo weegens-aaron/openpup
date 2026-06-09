@@ -1,8 +1,11 @@
-"""Scheduled routines — cron-style agent tasks delivered to a platform.
+"""Scheduled jobs — reminders + cron-style agent tasks delivered to a platform.
 
-On each heartbeat tick, due routines are run through the agent and their output
-delivered to the routine's configured address (unless the agent emits the
-``[SILENT]`` sentinel, mirroring hermes' no-spam pattern).
+On each heartbeat tick, due jobs fire:
+* a **message** job delivers its text verbatim (a reminder);
+* a **prompt** job runs through the agent and delivers the output (unless the
+  agent emits the ``[SILENT]`` sentinel, mirroring hermes' no-spam pattern).
+
+Delivery defaults to the owner's address when a job has no explicit target.
 """
 
 from __future__ import annotations
@@ -25,27 +28,31 @@ async def run_due_routines(
     registry: PlatformRegistry,
     scheduler: Scheduler,
 ) -> List[str]:
-    """Run every due routine and deliver results. Returns names that fired."""
+    """Fire every due job and deliver results. Returns names that fired."""
     fired: List[str] = []
-    for routine in scheduler.due():
-        logger.info("Running routine '%s'", routine.name)
+    for job in scheduler.due():
+        target = job.deliver or settings.owner_address
         try:
-            output = await host.run(
-                routine.prompt,
-                conversation=f"__routine__:{routine.name}",
-                keep_history=False,
-            )
+            if job.message:
+                # Plain reminder: deliver the text verbatim.
+                if target:
+                    await registry.send(Envelope.to(target, job.message))
+                else:
+                    logger.warning("Job '%s' has no delivery target", job.name)
+            else:
+                # Agent task: run the prompt, deliver the output.
+                logger.info("Running scheduled task '%s'", job.name)
+                output = (
+                    await host.run(
+                        job.prompt,
+                        conversation=f"__routine__:{job.name}",
+                        keep_history=False,
+                    )
+                    or ""
+                ).strip()
+                if output and "[SILENT]" not in output and target:
+                    await registry.send(Envelope.to(target, output))
+            fired.append(job.name)
         except Exception:
-            logger.exception("Routine '%s' failed", routine.name)
-            continue
-
-        output = (output or "").strip()
-        if not output or "[SILENT]" in output:
-            logger.debug("Routine '%s' chose silence", routine.name)
-            fired.append(routine.name)
-            continue
-
-        if routine.deliver:
-            await registry.send(Envelope.to(routine.deliver, output))
-        fired.append(routine.name)
+            logger.exception("Scheduled job '%s' failed", job.name)
     return fired

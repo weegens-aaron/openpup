@@ -186,41 +186,59 @@ def memory_recent(top_k: int = 5) -> None:
 
 @routine_app.command("list")
 def routine_list() -> None:
-    """List configured routines."""
+    """List scheduled jobs (reminders + tasks)."""
     from openpup.heartbeat.scheduler import Scheduler
 
     s = get_settings()
     sched = Scheduler.load(s.state_dir / "routines.json")
     if not sched.routines:
-        console.print("[dim]no routines[/dim]")
+        console.print("[dim]no scheduled jobs[/dim]")
         return
-    table = Table(title="Routines")
-    for col in ("name", "trigger", "deliver", "enabled"):
+    table = Table(title="Scheduled jobs")
+    for col in ("name", "kind", "when", "deliver", "enabled"):
         table.add_column(col)
     for r in sched.routines:
-        trigger = f"every {r.every}s" if r.every else f"daily {r.daily}"
-        table.add_row(r.name, trigger, r.deliver, str(r.enabled))
+        kind = "reminder" if r.message else "task"
+        table.add_row(r.name, kind, r.describe_when(), r.deliver or "(owner)", str(r.enabled))
     console.print(table)
 
 
 @routine_app.command("add")
 def routine_add(
     name: str,
-    prompt: str,
-    deliver: str = typer.Option(..., help="platform:channel address"),
-    every: Optional[int] = typer.Option(None, help="seconds between runs"),
-    daily: Optional[str] = typer.Option(None, help="HH:MM local time"),
+    deliver: str = typer.Option("", help="platform:channel address (default: owner)"),
+    message: str = typer.Option("", help="plain reminder text to deliver"),
+    prompt: str = typer.Option("", help="agent task prompt to run"),
+    every: Optional[int] = typer.Option(None, help="recurring: seconds between runs"),
+    daily: Optional[str] = typer.Option(None, help="recurring: HH:MM local time"),
+    in_seconds: Optional[int] = typer.Option(None, "--in", help="one-shot: fire in N seconds"),
+    at: Optional[str] = typer.Option(None, help="one-shot: ISO datetime (2026-06-09T09:00)"),
 ) -> None:
-    """Add or replace a scheduled routine."""
-    from openpup.heartbeat.scheduler import Routine, Scheduler
+    """Add or replace a scheduled job (reminder or task)."""
+    from openpup.heartbeat.scheduler import Scheduler, make_routine
 
-    if not (every or daily):
-        console.print("[red]Provide --every or --daily[/red]")
+    if not (message or prompt):
+        console.print("[red]Provide --message or --prompt[/red]")
+        raise typer.Exit(1)
+    timings = [t for t in (every, daily, in_seconds, at) if t not in (None, "")]
+    if len(timings) != 1:
+        console.print("[red]Provide exactly one of --every, --daily, --in, --at[/red]")
         raise typer.Exit(1)
     s = get_settings()
     sched = Scheduler.load(s.state_dir / "routines.json")
-    sched.add(Routine(name=name, prompt=prompt, deliver=deliver, every=every, daily=daily))
-    console.print(f"[green]added routine '{name}'[/green]")
+    sched.add(
+        make_routine(
+            name=name,
+            message=message,
+            prompt=prompt,
+            deliver=deliver,
+            delay_seconds=in_seconds,
+            at_iso=at,
+            every_seconds=every,
+            daily=daily,
+        )
+    )
+    console.print(f"[green]added job '{name}'[/green]")
 
 
 @access_app.command("list")
