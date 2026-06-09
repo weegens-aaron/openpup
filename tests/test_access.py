@@ -100,6 +100,41 @@ def test_multiple_owner_addresses(tmp_path):
     assert ac.check(_env(platform="sms", channel="+19999999999")).role != OWNER
 
 
+class FakeDirectory:
+    def __init__(self, roles):
+        # roles: {(platform, channel): role}
+        self._roles = roles
+
+    def role_of(self, platform, channel):
+        return self._roles.get((platform, str(channel)), "")
+
+
+def test_roster_blocked_role_denies(tmp_path):
+    d = FakeDirectory({("telegram", "999"): "blocked"})
+    ac = AccessControl(tmp_path / "access.json", owner_address="telegram:111", directory=d)
+    assert not ac.check(_env(channel="999")).allowed
+
+
+def test_roster_allowed_role_permits_in_allowlist_mode(tmp_path):
+    d = FakeDirectory({("telegram", "999"): "allowed"})
+    ac = AccessControl(tmp_path / "access.json", owner_address="telegram:111", directory=d)
+    ac.set_mode("telegram", MODE_ALLOWLIST)
+    assert ac.check(_env(channel="999")).allowed
+
+
+def test_roster_owner_role_is_owner(tmp_path):
+    d = FakeDirectory({("telegram", "999"): "owner"})
+    ac = AccessControl(tmp_path / "access.json", owner_address="telegram:111", directory=d)
+    assert ac.check(_env(channel="999")).role == OWNER
+
+
+def test_roster_role_matches_sender_id(tmp_path):
+    d = FakeDirectory({("discord", "user42"): "blocked"})
+    ac = AccessControl(tmp_path / "access.json", directory=d)
+    env = _env(platform="discord", channel="chan", sender_id="user42")
+    assert not ac.check(env).allowed
+
+
 def test_no_owner_configured(tmp_path):
     ac = AccessControl(tmp_path / "access.json", owner_address=None)
     # open mode by default -> allowed but not owner

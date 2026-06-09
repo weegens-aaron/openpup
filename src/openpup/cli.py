@@ -61,6 +61,14 @@ def run(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
 
 
 @app.command()
+def users() -> None:
+    """Edit the per-platform user roster (name / handle / role / notes)."""
+    from openpup.tui.roster import run_roster_menu
+
+    asyncio.run(run_roster_menu())
+
+
+@app.command()
 def persona(
     env_file: Optional[str] = typer.Option(None, "--env-file", help="Path to the .env to write."),
 ) -> None:

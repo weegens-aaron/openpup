@@ -227,6 +227,26 @@ openpup access deny telegram 67890           # remove someone
 Senders are matched by chat id / phone / email / user id, so it works across
 platforms. Policies persist to `~/.openpup/access.json`.
 
+### User roster (editable table per platform)
+
+Every connector has an editable **user table** -- name, handle, **role**, notes:
+
+```bash
+openpup users        # pick a platform -> add/edit/remove users
+```
+(Also under `openpup config` -> Users / Roster.) Users are learned
+automatically when people message you, and you can edit them by hand. The
+**role** drives access:
+
+| Role | Effect |
+|------|--------|
+| `(none)` | follows the platform's mode |
+| `allowed` | can always talk to the pup, even in allowlist mode |
+| `blocked` | messages are dropped |
+| `owner` | treated as you |
+
+Backed by `~/.openpup/contacts.json`.
+
 ## The heartbeat behaviors
 
 Configured via `OPENPUP_HEARTBEAT_BEHAVIORS` (comma-separated):

@@ -285,9 +285,10 @@ async def run_config_menu(env_path: Optional[Path] = None) -> None:
     cursor = 0
 
     persona_label = "Persona / Identity (edit SOUL)..."
+    roster_label = "Users / Roster (per platform)..."
     while True:
         options = [s.title for s in SCHEMA]
-        options += [persona_label, "Save & exit", "Exit without saving"]
+        options += [persona_label, roster_label, "Save & exit", "Exit without saving"]
 
         def preview(idx: int) -> str:
             if idx < len(SCHEMA):
@@ -322,6 +323,13 @@ async def run_config_menu(env_path: Optional[Path] = None) -> None:
             await run_persona_menu(path)
             store.load()  # persona editor writes .env itself; reload
             cursor = len(SCHEMA)
+            continue
+
+        if picked == roster_label:
+            from openpup.tui.roster import run_roster_menu
+
+            await run_roster_menu()
+            cursor = len(SCHEMA) + 1
             continue
 
         cursor = options.index(picked)

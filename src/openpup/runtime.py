@@ -44,6 +44,7 @@ class OpenPup:
             default_access_path(self.settings.state_dir),
             owner_address=self.settings.owner_address,
             owner_addresses=self.settings.owner_addresses,
+            directory=get_directory(),
         )
 
     # ---- inbound handling ------------------------------------------------

@@ -74,8 +74,10 @@ class AccessControl:
         path: Path,
         owner_address: Optional[str] = None,
         owner_addresses: Optional[List[str]] = None,
+        directory=None,
     ) -> None:
         self.path = path
+        self.directory = directory  # optional ContactDirectory for per-user roles
         self.owner_address = owner_address  # primary (for describe / outreach)
         addrs: List[str] = []
         if owner_address:
@@ -144,16 +146,34 @@ class AccessControl:
     def _candidates(envelope) -> Set[str]:
         return {str(v) for v in (envelope.channel, envelope.sender, envelope.sender_id) if v}
 
+    def _directory_role(self, envelope) -> str:
+        """Role assigned to this sender in the editable roster, if any."""
+        if self.directory is None:
+            return ""
+        for ident in (envelope.channel, envelope.sender_id):
+            if ident:
+                role = self.directory.role_of(envelope.platform, str(ident))
+                if role:
+                    return role
+        return ""
+
     def is_owner(self, envelope) -> bool:
         candidates = self._candidates(envelope)
         for owner_platform, owner_channel in self._owner_parts():
             if envelope.platform == owner_platform and owner_channel in candidates:
                 return True
-        return False
+        # A roster entry explicitly marked 'owner' also counts.
+        return self._directory_role(envelope) == "owner"
 
     def check(self, envelope) -> Decision:
         if self.is_owner(envelope):
             return Decision(True, OWNER)
+        # Roster role overrides: blocked -> denied, allowed -> allowed.
+        role = self._directory_role(envelope)
+        if role == "blocked":
+            return Decision(False, DENIED, "blocked in the user roster")
+        if role == "allowed":
+            return Decision(True, ALLOWED)
         cfg = self._cfg(envelope.platform)
         mode = cfg.get("mode", MODE_OPEN)
         if mode == MODE_OWNER_ONLY:

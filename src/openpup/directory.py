@@ -77,11 +77,68 @@ class ContactDirectory:
                 "platform": platform,
                 "channel": channel,
                 "name": name or channel,
+                "role": "",
+                "notes": "",
                 "last_seen": time.time(),
                 "count": 1,
             }
         )
         self.save()
+
+    # ---- manual editing (the roster table) -------------------------------
+    def upsert(
+        self,
+        platform: str,
+        channel: str,
+        name: Optional[str] = None,
+        role: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> dict:
+        """Create or update a roster entry (used by the config editor)."""
+        entry = self.get(platform, channel)
+        if entry is None:
+            entry = {
+                "platform": platform,
+                "channel": channel,
+                "name": name or channel,
+                "role": role or "",
+                "notes": notes or "",
+                "last_seen": 0.0,
+                "count": 0,
+            }
+            self.contacts.append(entry)
+        else:
+            if name is not None:
+                entry["name"] = name
+            if role is not None:
+                entry["role"] = role
+            if notes is not None:
+                entry["notes"] = notes
+        self.save()
+        return entry
+
+    def remove(self, platform: str, channel: str) -> bool:
+        before = len(self.contacts)
+        self.contacts = [
+            c for c in self.contacts if not (c["platform"] == platform and c["channel"] == channel)
+        ]
+        if len(self.contacts) < before:
+            self.save()
+            return True
+        return False
+
+    def get(self, platform: str, channel: str) -> Optional[dict]:
+        for c in self.contacts:
+            if c["platform"] == platform and c["channel"] == channel:
+                return c
+        return None
+
+    def by_platform(self, platform: str) -> List[dict]:
+        return [c for c in self.contacts if c["platform"] == platform]
+
+    def role_of(self, platform: str, channel: str) -> str:
+        entry = self.get(platform, channel)
+        return (entry or {}).get("role", "") or ""
 
     # ---- lookup ----------------------------------------------------------
     def resolve(self, query: str) -> Optional[str]:
