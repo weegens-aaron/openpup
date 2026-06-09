@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     reflection_model: Optional[str] = Field(None, alias="OPENPUP_REFLECTION_MODEL")
     # Universal Constructor: let the agent build its own tools at runtime.
     universal_constructor: bool = Field(True, alias="OPENPUP_UNIVERSAL_CONSTRUCTOR")
+    # Persona presets used to generate SOUL.md (the editable identity).
+    personality: str = Field("warm_loyal_sassy", alias="OPENPUP_PERSONALITY")
+    proactivity: str = Field("relentless", alias="OPENPUP_PROACTIVITY")
 
     # ---- Owner -----------------------------------------------------------
     owner_address: Optional[str] = Field(None, alias="OPENPUP_OWNER_ADDRESS")

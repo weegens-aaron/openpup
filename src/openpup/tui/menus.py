@@ -276,9 +276,10 @@ async def run_config_menu(env_path: Optional[Path] = None) -> None:
     dirty = False
     cursor = 0
 
+    persona_label = "Persona / Identity (edit SOUL)..."
     while True:
         options = [s.title for s in SCHEMA]
-        options += ["Save & exit", "Exit without saving"]
+        options += [persona_label, "Save & exit", "Exit without saving"]
 
         def preview(idx: int) -> str:
             if idx < len(SCHEMA):
@@ -306,6 +307,14 @@ async def run_config_menu(env_path: Optional[Path] = None) -> None:
             store.save()
             console.print(f"[green]Saved configuration to {path}[/green]")
             return
+
+        if picked == persona_label:
+            from openpup.tui.persona import run_persona_menu
+
+            await run_persona_menu(path)
+            store.load()  # persona editor writes .env itself; reload
+            cursor = len(SCHEMA)
+            continue
 
         cursor = options.index(picked)
         section = SCHEMA[cursor]

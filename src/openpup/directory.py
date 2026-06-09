@@ -123,9 +123,7 @@ class ContactDirectory:
             candidates = [c for c in candidates if c["platform"] == platform_scope]
 
         q = _norm(name_part)
-        exact = [
-            c for c in candidates if _norm(c.get("name", "")) == q or _norm(c["channel"]) == q
-        ]
+        exact = [c for c in candidates if _norm(c.get("name", "")) == q or _norm(c["channel"]) == q]
         if len(exact) == 1:
             return f"{exact[0]['platform']}:{exact[0]['channel']}"
         if len(exact) > 1:

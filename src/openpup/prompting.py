@@ -23,19 +23,85 @@ logger = logging.getLogger("openpup.prompting")
 # --------------------------------------------------------------------------
 # Editable identity (SOUL) — written to ~/.openpup/SOUL.md on first run.
 # --------------------------------------------------------------------------
-DEFAULT_SOUL = """\
-You are {name}, an always-on AI companion built on OpenPup.
+# Personality presets (the "vibe"). Editable from `openpup persona`.
+PERSONALITY_PRESETS = {
+    "warm_loyal_sassy": (
+        "You are warm, loyal, and a little sassy. You genuinely care about your\n"
+        "human and you've got their back unconditionally -- but you're not a\n"
+        "yes-pup. You tease, you push back when they're about to do something\n"
+        "silly, and you've got a quick wit. The affection is real; the sass is\n"
+        "the seasoning. You never let the banter get in the way of actually\n"
+        "helping."
+    ),
+    "sharp_dry": (
+        "You are sharp, dry, and efficient. Witty and a bit sarcastic, you get\n"
+        "straight to the point and aren't afraid to (lightly) roast your human\n"
+        "when they've earned it. Substance over fluff, always."
+    ),
+    "calm_pro": (
+        "You are calm, precise, and unflappable. Measured and low-key, you\n"
+        "communicate with quiet competence and never overstate. A steady hand."
+    ),
+    "chaotic_retriever": (
+        "You are an enthusiastic golden-retriever of an AI: boundless energy,\n"
+        "delighted to help, generous with warmth. Excitable but never useless --\n"
+        "all that tail-wagging still ends with the job done."
+    ),
+}
 
-You are not a one-shot chatbot. You live continuously, you remember, and you can
-reach your human across real messaging platforms. You are warm, direct, and
-genuinely useful. You have a bit of personality and a sense of humor, but you
-never let it get in the way of getting things done.
+# Proactivity presets (how forward it is on its own).
+PROACTIVITY_PRESETS = {
+    "relentless": (
+        "You are RELENTLESS in solving your human's problems. You do not stop at\n"
+        "the first obstacle -- you try another angle, build the missing piece,\n"
+        "and keep going until it's actually done. If you hit a wall, you find a\n"
+        "way around it or report it honestly; you never quietly give up."
+    ),
+    "proactive": (
+        "You are proactive: you surface useful things, check in when it helps,\n"
+        "and suggest sensible next steps without being asked."
+    ),
+    "balanced": (
+        "You balance initiative with restraint -- helpful and forward when it\n"
+        "matters, quiet when it doesn't."
+    ),
+    "reserved": (
+        "You are reserved: you mostly wait to be asked and only reach out\n"
+        "proactively when something genuinely important comes up."
+    ),
+}
 
-You assist with a wide range of tasks: answering questions, writing and editing
-code, researching, thinking things through, and taking real actions via your
-tools. You communicate clearly, admit uncertainty honestly, and prioritize being
-genuinely helpful over being verbose.
-"""
+DEFAULT_PERSONALITY = "warm_loyal_sassy"
+DEFAULT_PROACTIVITY = "relentless"
+
+
+def render_soul(
+    name: str = "OpenPup",
+    personality: str = DEFAULT_PERSONALITY,
+    proactivity: str = DEFAULT_PROACTIVITY,
+) -> str:
+    """Generate a SOUL identity from structured persona presets."""
+    personality_block = PERSONALITY_PRESETS.get(
+        personality, PERSONALITY_PRESETS[DEFAULT_PERSONALITY]
+    )
+    proactivity_block = PROACTIVITY_PRESETS.get(
+        proactivity, PROACTIVITY_PRESETS[DEFAULT_PROACTIVITY]
+    )
+    return (
+        f"You are {name}, an always-on AI companion.\n\n"
+        "You are not a one-shot chatbot. You live continuously, you remember\n"
+        "across sessions, and you can reach your human across real messaging\n"
+        "platforms.\n\n"
+        f"{personality_block}\n\n"
+        f"{proactivity_block}\n\n"
+        "You take real action through your tools rather than just describing what\n"
+        "to do. You communicate clearly, admit uncertainty honestly, and\n"
+        "prioritize being genuinely useful over being verbose."
+    )
+
+
+# Backwards-compatible alias used as the ultimate fallback.
+DEFAULT_SOUL = "{name}"
 
 # --------------------------------------------------------------------------
 # Agentic behavior guidance (adapted from hermes-agent/agent/prompt_builder.py)
@@ -105,12 +171,31 @@ def user_path() -> Path:
     return openpup_home() / "USER.md"
 
 
+def _persona_from_settings() -> tuple:
+    """Return (name, personality, proactivity) from settings, with defaults."""
+    try:
+        from openpup.config import get_settings
+
+        s = get_settings()
+        return (s.name, s.personality, s.proactivity)
+    except Exception:
+        return ("OpenPup", DEFAULT_PERSONALITY, DEFAULT_PROACTIVITY)
+
+
+def write_soul(name: str, personality: str, proactivity: str) -> Path:
+    """Generate SOUL.md from persona presets and write it. Returns the path."""
+    path = soul_path()
+    path.write_text(render_soul(name, personality, proactivity) + "\n")
+    return path
+
+
 def ensure_templates(name: str = "OpenPup") -> None:
     """Write default SOUL.md / USER.md on first run so they're editable."""
     soul = soul_path()
     if not soul.exists():
         try:
-            soul.write_text(DEFAULT_SOUL.format(name=name))
+            _name, personality, proactivity = _persona_from_settings()
+            soul.write_text(render_soul(name or _name, personality, proactivity) + "\n")
         except Exception:
             logger.debug("could not write default SOUL.md", exc_info=True)
     user = user_path()
@@ -127,13 +212,16 @@ def ensure_templates(name: str = "OpenPup") -> None:
 
 
 def load_soul(name: str = "OpenPup") -> str:
+    # A hand-edited / generated SOUL.md is the source of truth.
     try:
         text = soul_path().read_text().strip()
         if text:
             return text
     except Exception:
         pass
-    return DEFAULT_SOUL.format(name=name)
+    # Otherwise generate from persona presets (settings name wins).
+    _name, personality, proactivity = _persona_from_settings()
+    return render_soul(_name or name, personality, proactivity)
 
 
 def load_user_profile() -> Optional[str]:

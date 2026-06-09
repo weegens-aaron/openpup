@@ -122,8 +122,16 @@ OpenPup ports hermes-agent's prompting and task-tracking discipline on top of
 code-puppy's tool-calling loop, so the agent plans and *finishes* multi-step
 work instead of stopping after a stub:
 
-- **Editable identity** — `~/.openpup/SOUL.md` is your pup's persona (created on
-  first run; edit it freely). `~/.openpup/USER.md` holds durable facts about you.
+- **Editable identity** — `~/.openpup/SOUL.md` is your pup's persona.
+  `~/.openpup/USER.md` holds durable facts about you. Edit the persona from the
+  CLI:
+  ```bash
+  openpup persona          # name + personality + proactivity, with live preview
+  ```
+  Personality presets: `warm_loyal_sassy` (default), `sharp_dry`, `calm_pro`,
+  `chaotic_retriever`. Proactivity: `relentless` (default), `proactive`,
+  `balanced`, `reserved`. "Save" regenerates SOUL.md; or drop into `$EDITOR`
+  for full hand-control. Also reachable from `openpup config` -> Persona.
 - **Layered system prompt** — SOUL identity -> capabilities -> agentic guidance
   ("take action, don't describe it"; "finish the job, never fabricate output";
   memory discipline) -> user profile -> recent-memory snapshot -> timestamp.

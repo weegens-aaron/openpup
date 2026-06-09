@@ -61,6 +61,19 @@ def run(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
 
 
 @app.command()
+def persona(
+    env_file: Optional[str] = typer.Option(None, "--env-file", help="Path to the .env to write."),
+) -> None:
+    """Edit your pup's identity (name, personality, proactivity -> SOUL.md)."""
+    from pathlib import Path
+
+    from openpup.tui.persona import run_persona_menu
+
+    path = Path(env_file) if env_file else None
+    asyncio.run(run_persona_menu(path))
+
+
+@app.command()
 def setup(
     env_file: Optional[str] = typer.Option(None, "--env-file", help="Path to the .env to write."),
 ) -> None:
