@@ -74,6 +74,14 @@ class OpenPup:
             return
 
         access.set_current_role(decision.role)
+
+        # Manual escape hatch: let the owner wipe a stuck conversation's context
+        # without restarting the daemon.
+        if envelope.text.strip().lower() in ("/reset", "/forget", "/new"):
+            self.host.reset_conversation(envelope.address)
+            await self.registry.send(envelope.reply("Fresh start \U0001f9fc — context cleared."))
+            return
+
         prompt = self._context_prefix(envelope, decision.role) + envelope.text
         try:
             reply = await self.host.run(prompt, conversation=envelope.address)

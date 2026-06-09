@@ -161,34 +161,31 @@ class AgentHost:
         agentic.set_conversation(conversation)
 
         async with self._lock:
-            history = self._histories.get(conversation, [])
             effective_model = model or self.default_model
+            base_history = self._histories.get(conversation, [])
 
-            attempts = max(1, self.max_retries)
-            for attempt in range(1, attempts + 1):
-                # Reset to the clean stored history each attempt: a failed
-                # streaming run can leave the agent's in-place history dirty.
-                self._agent.set_message_history(list(history))
-                try:
-                    if effective_model:
-                        with self._agent.temporary_model_name_override(effective_model):
-                            result = await self._agent.run_with_mcp(prompt)
-                    else:
-                        result = await self._agent.run_with_mcp(prompt)
-                    break
-                except Exception as exc:
-                    if attempt < attempts and _is_transient(exc):
-                        delay = min(8.0, 1.5 * attempt)
-                        logger.warning(
-                            "Transient agent error (attempt %d/%d) for '%s': %s; retrying in %.1fs",
-                            attempt,
-                            attempts,
-                            conversation,
-                            exc,
-                            delay,
-                        )
-                        await asyncio.sleep(delay)
-                        continue
+            try:
+                result = await self._attempt_with_retries(
+                    prompt, base_history, effective_model, conversation
+                )
+            except Exception as exc:
+                # Self-heal: a conversation that keeps failing is almost always a
+                # too-large or malformed message history (the streamed response
+                # never completes). Drop that history and retry from a clean
+                # slate so the user can keep chatting. Context is lost, but the
+                # pup recovers instead of being wedged forever.
+                if base_history:
+                    logger.warning(
+                        "Conversation '%s' failed (%s); resetting its history and "
+                        "retrying from a clean slate.",
+                        conversation,
+                        exc,
+                    )
+                    self._histories.pop(conversation, None)
+                    result = await self._attempt_with_retries(
+                        prompt, [], effective_model, conversation
+                    )
+                else:
                     logger.exception("Agent run failed for conversation '%s'", conversation)
                     raise
 
@@ -196,6 +193,39 @@ class AgentHost:
                 self._histories[conversation] = list(self._agent.get_message_history())
 
             return _extract_text(result)
+
+    async def _attempt_with_retries(
+        self,
+        prompt: str,
+        base_history: List[Any],
+        effective_model: Optional[str],
+        conversation: str,
+    ) -> Any:
+        """Run the agent with transient-error retries against a fixed base history."""
+        attempts = max(1, self.max_retries)
+        for attempt in range(1, attempts + 1):
+            # Reset to the clean base history each attempt: a failed streaming
+            # run can leave the agent's in-place history dirty.
+            self._agent.set_message_history(list(base_history))
+            try:
+                if effective_model:
+                    with self._agent.temporary_model_name_override(effective_model):
+                        return await self._agent.run_with_mcp(prompt)
+                return await self._agent.run_with_mcp(prompt)
+            except Exception as exc:
+                if attempt < attempts and _is_transient(exc):
+                    delay = min(8.0, 1.5 * attempt)
+                    logger.warning(
+                        "Transient agent error (attempt %d/%d) for '%s': %s; retrying in %.1fs",
+                        attempt,
+                        attempts,
+                        conversation,
+                        exc,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
 
     def reset_conversation(self, conversation: str) -> None:
         self._histories.pop(conversation, None)

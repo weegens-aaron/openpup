@@ -86,5 +86,51 @@ async def test_run_does_not_retry_logic_error(monkeypatch):
     assert host._agent.calls == 1
 
 
+class _HistorySensitiveAgent:
+    """Fails while history is non-empty, succeeds once history is cleared."""
+
+    def __init__(self, exc):
+        self.exc = exc
+        self._hist = []
+        self.calls = 0
+
+    def set_message_history(self, h):
+        self._hist = list(h)
+
+    def get_message_history(self):
+        return self._hist
+
+    async def run_with_mcp(self, prompt):
+        self.calls += 1
+        if self._hist:
+            raise self.exc
+        return SimpleNamespace(output="recovered")
+
+
+@pytest.mark.asyncio
+async def test_run_self_heals_wedged_conversation(monkeypatch):
+    monkeypatch.setattr("openpup.agent_host.asyncio.sleep", _fast_sleep)
+    host = AgentHost(max_retries=2)
+    host._agent = _HistorySensitiveAgent(httpx.RemoteProtocolError("incomplete chunked read"))
+    host._histories["telegram:1"] = [{"role": "user", "content": "old context"}]
+
+    out = await host.run("hi again", conversation="telegram:1")
+
+    assert out == "recovered"
+    # 2 failed attempts on the dirty history, then 1 clean-slate success.
+    assert host._agent.calls == 3
+    assert host._histories["telegram:1"] == []
+
+
+@pytest.mark.asyncio
+async def test_run_no_self_heal_when_history_empty(monkeypatch):
+    monkeypatch.setattr("openpup.agent_host.asyncio.sleep", _fast_sleep)
+    host = AgentHost(max_retries=2)
+    host._agent = _FakeAgent(5, httpx.RemoteProtocolError("peer closed connection"))
+    with pytest.raises(httpx.RemoteProtocolError):
+        await host.run("hi", conversation="telegram:1")
+    assert host._agent.calls == 2
+
+
 async def _fast_sleep(_seconds):
     return None
