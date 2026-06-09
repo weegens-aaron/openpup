@@ -190,9 +190,23 @@ the heartbeat share one scheduler, so jobs the pup sets fire live.
 ## Access control (owner + allowlists)
 
 OpenPup distinguishes **you (the owner)** from anyone else who messages the bot.
-The owner is your `OPENPUP_OWNER_ADDRESS` (`platform:channel`). Privileged tools
-(reading your email, sending messages on your behalf) are **owner-only**; the
-agent is told per-message whether it's talking to you or a stranger.
+Privileged tools (reading your email, sending messages on your behalf) are
+**owner-only**; the agent is told per-message whether it's talking to you or a
+stranger.
+
+You can be the owner on **several platforms at once** (e.g. Telegram *and* your
+cell). `OPENPUP_OWNER_ADDRESS` is your primary (default outreach target);
+`OPENPUP_OWNER_ADDRESSES` is the full comma-separated list. You're recognized
+and reachable at any of them.
+
+```bash
+openpup access owner telegram:12345               # set primary
+openpup access owner sms:+15559876543 --add       # also recognize your cell
+```
+
+> SMS note: `TWILIO_FROM_NUMBER` is the Twilio-owned **sender** number you buy
+> in Twilio; your **personal cell** is the owner address (`sms:+1...`). They are
+> two different numbers. The setup wizard now asks for both.
 
 Each platform has an access **mode**:
 

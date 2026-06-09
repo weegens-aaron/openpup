@@ -111,6 +111,9 @@ def status() -> None:
     table.add_row("Reflection model", s.reflection_model or "(same as agent)")
     table.add_row("Universal Constructor", "on" if s.universal_constructor else "off")
     table.add_row("Owner", s.owner_address or "(unset)")
+    extra_owners = [a for a in s.owner_addresses if a != s.owner_address]
+    if extra_owners:
+        table.add_row("  also owner at", ", ".join(extra_owners))
     table.add_row("Send policy", f"{s.send_policy} ({s.send_rate_per_min}/min)")
     table.add_row("Kennel root", str(s.kennel_path))
     table.add_row("Heartbeat", "on" if s.heartbeat_enabled else "off")
@@ -247,24 +250,42 @@ def access_list() -> None:
     from openpup.access import AccessControl, default_access_path
 
     s = get_settings()
-    ac = AccessControl(default_access_path(s.state_dir), owner_address=s.owner_address)
+    ac = AccessControl(
+        default_access_path(s.state_dir),
+        owner_address=s.owner_address,
+        owner_addresses=s.owner_addresses,
+    )
     console.print(ac.describe())
 
 
 @access_app.command("owner")
-def access_owner(address: str) -> None:
-    """Set the owner address (platform:channel), written to .env."""
+def access_owner(
+    address: str,
+    primary: bool = typer.Option(
+        True, "--primary/--add", help="--primary sets the default outreach target; --add only adds."
+    ),
+) -> None:
+    """Add/set an owner address (platform:channel), written to .env.
+
+    The owner can be reachable on several platforms (telegram + sms + ...). Use
+    ``--add`` to register an extra one without changing your primary address.
+    """
     from pathlib import Path
 
     from openpup.tui.env_store import EnvStore
 
     if ":" not in address:
-        console.print("[red]Address must be 'platform:channel', e.g. telegram:12345[/red]")
+        console.print("[red]Address must be 'platform:channel', e.g. sms:+15559876543[/red]")
         raise typer.Exit(1)
     store = EnvStore(Path.cwd() / ".env")
-    store.set("OPENPUP_OWNER_ADDRESS", address)
+    if primary or not store.get("OPENPUP_OWNER_ADDRESS"):
+        store.set("OPENPUP_OWNER_ADDRESS", address)
+    existing = [a.strip() for a in store.get("OPENPUP_OWNER_ADDRESSES").split(",") if a.strip()]
+    if address not in existing:
+        existing.append(address)
+    store.set("OPENPUP_OWNER_ADDRESSES", ",".join(existing))
     store.save()
-    console.print(f"[green]Owner set to {address}[/green]")
+    console.print(f"[green]Owner address registered: {address}[/green]")
 
 
 @access_app.command("allow")
@@ -273,7 +294,11 @@ def access_allow(platform: str, identifier: str) -> None:
     from openpup.access import AccessControl, default_access_path
 
     s = get_settings()
-    ac = AccessControl(default_access_path(s.state_dir), owner_address=s.owner_address)
+    ac = AccessControl(
+        default_access_path(s.state_dir),
+        owner_address=s.owner_address,
+        owner_addresses=s.owner_addresses,
+    )
     ac.allow(platform, identifier)
     console.print(f"[green]Allowed {identifier} on {platform} (mode now allowlist).[/green]")
 
@@ -284,7 +309,11 @@ def access_deny(platform: str, identifier: str) -> None:
     from openpup.access import AccessControl, default_access_path
 
     s = get_settings()
-    ac = AccessControl(default_access_path(s.state_dir), owner_address=s.owner_address)
+    ac = AccessControl(
+        default_access_path(s.state_dir),
+        owner_address=s.owner_address,
+        owner_addresses=s.owner_addresses,
+    )
     ok = ac.deny(platform, identifier)
     console.print(
         f"[green]Removed {identifier} from {platform}.[/green]"
@@ -302,7 +331,11 @@ def access_mode(platform: str, mode: str) -> None:
         console.print(f"[red]mode must be one of: {', '.join(MODES)}[/red]")
         raise typer.Exit(1)
     s = get_settings()
-    ac = AccessControl(default_access_path(s.state_dir), owner_address=s.owner_address)
+    ac = AccessControl(
+        default_access_path(s.state_dir),
+        owner_address=s.owner_address,
+        owner_addresses=s.owner_addresses,
+    )
     ac.set_mode(platform, mode)
     console.print(f"[green]{platform} access mode set to {mode}.[/green]")
 

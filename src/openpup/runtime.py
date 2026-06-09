@@ -43,6 +43,7 @@ class OpenPup:
         self.access = AccessControl(
             default_access_path(self.settings.state_dir),
             owner_address=self.settings.owner_address,
+            owner_addresses=self.settings.owner_addresses,
         )
 
     # ---- inbound handling ------------------------------------------------

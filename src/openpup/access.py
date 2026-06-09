@@ -69,9 +69,21 @@ class Decision:
 class AccessControl:
     """Owner + per-platform allowlist policy, persisted as JSON."""
 
-    def __init__(self, path: Path, owner_address: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        owner_address: Optional[str] = None,
+        owner_addresses: Optional[List[str]] = None,
+    ) -> None:
         self.path = path
-        self.owner_address = owner_address
+        self.owner_address = owner_address  # primary (for describe / outreach)
+        addrs: List[str] = []
+        if owner_address:
+            addrs.append(owner_address)
+        for a in owner_addresses or []:
+            if a and a not in addrs:
+                addrs.append(a)
+        self.owner_addresses = addrs
         self.platforms: Dict[str, dict] = {}
         self.load()
 
@@ -120,21 +132,24 @@ class AccessControl:
 
     # ---- evaluation ------------------------------------------------------
     def _owner_parts(self):
-        if self.owner_address and ":" in self.owner_address:
-            platform, channel = self.owner_address.split(":", 1)
-            return platform.strip(), channel.strip()
-        return None
+        """Return [(platform, channel), ...] for every owner address."""
+        out = []
+        for a in self.owner_addresses:
+            if ":" in a:
+                platform, channel = a.split(":", 1)
+                out.append((platform.strip(), channel.strip()))
+        return out
 
     @staticmethod
     def _candidates(envelope) -> Set[str]:
         return {str(v) for v in (envelope.channel, envelope.sender, envelope.sender_id) if v}
 
     def is_owner(self, envelope) -> bool:
-        parts = self._owner_parts()
-        if not parts:
-            return False
-        owner_platform, owner_channel = parts
-        return envelope.platform == owner_platform and owner_channel in self._candidates(envelope)
+        candidates = self._candidates(envelope)
+        for owner_platform, owner_channel in self._owner_parts():
+            if envelope.platform == owner_platform and owner_channel in candidates:
+                return True
+        return False
 
     def check(self, envelope) -> Decision:
         if self.is_owner(envelope):
@@ -152,7 +167,8 @@ class AccessControl:
         return Decision(False, DENIED, "not on allowlist")
 
     def describe(self) -> str:
-        lines = [f"owner: {self.owner_address or '(unset)'}"]
+        owners = ", ".join(self.owner_addresses) or "(unset)"
+        lines = [f"owner(s): {owners}"]
         if not self.platforms:
             lines.append("no per-platform policies (all platforms are open)")
         for platform, cfg in sorted(self.platforms.items()):

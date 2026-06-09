@@ -56,6 +56,21 @@ class Flow:
 # --------------------------------------------------------------------------
 # Per-platform flows
 # --------------------------------------------------------------------------
+def _add_owner_address(store: EnvStore, address: str) -> None:
+    """Register ``address`` as an owner identity.
+
+    Sets it as the PRIMARY owner address if none is set yet, and always adds it
+    to the multi-platform owner list (OPENPUP_OWNER_ADDRESSES) so the owner is
+    recognized and reachable on that platform.
+    """
+    if not store.get("OPENPUP_OWNER_ADDRESS"):
+        store.set("OPENPUP_OWNER_ADDRESS", address)
+    existing = [a.strip() for a in store.get("OPENPUP_OWNER_ADDRESSES").split(",") if a.strip()]
+    if address not in existing:
+        existing.append(address)
+    store.set("OPENPUP_OWNER_ADDRESSES", ",".join(existing))
+
+
 async def _telegram_post(store: EnvStore, values: dict) -> None:
     token = values["TELEGRAM_BOT_TOKEN"]
     console.print(
@@ -66,13 +81,33 @@ async def _telegram_post(store: EnvStore, values: dict) -> None:
         return
     chat_id = await validators.telegram_discover_chat_id(token)
     if chat_id:
-        store.set("OPENPUP_OWNER_ADDRESS", f"telegram:{chat_id}")
+        _add_owner_address(store, f"telegram:{chat_id}")
         console.print(f"[green]Found your chat id: {chat_id} -> owner address set.[/green]")
     else:
         console.print(
-            "[yellow]Couldn't find a message yet. You can set OPENPUP_OWNER_ADDRESS "
+            "[yellow]Couldn't find a message yet. You can set your owner address "
             "later in 'openpup config'.[/yellow]"
         )
+
+
+async def _sms_post(store: EnvStore, values: dict) -> None:
+    console.print(
+        "\n[bold]What's YOUR personal mobile number?[/bold] (the one OpenPup should "
+        "text and recognize you from -- NOT the Twilio number)."
+    )
+    number = await prompt_text("Your mobile number (E.164, e.g. +15559876543):")
+    if not number:
+        console.print("[yellow]Skipped. Set your owner address later in 'openpup config'.[/yellow]")
+        return
+    number = number.strip().replace(" ", "")
+    if number == values.get("TWILIO_FROM_NUMBER", "").strip():
+        console.print(
+            "[red]That's the same as your Twilio sender number. Your personal cell must "
+            "be different from the Twilio number.[/red]"
+        )
+        return
+    _add_owner_address(store, f"sms:{number}")
+    console.print(f"[green]Owner SMS number set: sms:{number}[/green]")
 
 
 FLOWS: List[Flow] = [
@@ -142,7 +177,11 @@ FLOWS: List[Flow] = [
         intro="Twilio sends/receives SMS. Outbound works immediately; inbound needs a webhook.",
         steps=[
             Step("Create a Twilio account (trial is fine).", "https://www.twilio.com/try-twilio"),
-            Step("Get a phone number with SMS capability under Phone Numbers."),
+            Step(
+                "Buy/provision a Twilio number WITH SMS capability under Phone Numbers. "
+                "This Twilio-owned number is the SENDER -- not your personal cell."
+            ),
+            Step("On a trial account, verify your own mobile number so Twilio can text it."),
             Step(
                 "Copy your Account SID and Auth Token from the Console dashboard.",
                 "https://console.twilio.com",
@@ -151,11 +190,15 @@ FLOWS: List[Flow] = [
         fields=[
             CredField("TWILIO_ACCOUNT_SID", "Account SID"),
             CredField("TWILIO_AUTH_TOKEN", "Auth token", secret=True),
-            CredField("TWILIO_FROM_NUMBER", "Twilio phone number (+1...)"),
+            CredField(
+                "TWILIO_FROM_NUMBER",
+                "Twilio SENDER number (the number you bought in Twilio, E.164 +1...)",
+            ),
         ],
         validate=lambda v: validators.validate_twilio(
             v["TWILIO_ACCOUNT_SID"], v["TWILIO_AUTH_TOKEN"]
         ),
+        post_setup=_sms_post,
         needs_tunnel=True,
     ),
     Flow(

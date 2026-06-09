@@ -85,6 +85,21 @@ def test_persistence(tmp_path):
     assert reloaded._cfg("discord")["mode"] == MODE_OWNER_ONLY
 
 
+def test_multiple_owner_addresses(tmp_path):
+    ac = AccessControl(
+        tmp_path / "access.json",
+        owner_address="telegram:111",
+        owner_addresses=["telegram:111", "sms:+15559876543"],
+    )
+    # owner recognized on telegram
+    assert ac.check(_env(platform="telegram", channel="111")).role == OWNER
+    # AND on sms (their cell)
+    sms_env = _env(platform="sms", channel="+15559876543")
+    assert ac.check(sms_env).role == OWNER
+    # a different sms number is not the owner
+    assert ac.check(_env(platform="sms", channel="+19999999999")).role != OWNER
+
+
 def test_no_owner_configured(tmp_path):
     ac = AccessControl(tmp_path / "access.json", owner_address=None)
     # open mode by default -> allowed but not owner

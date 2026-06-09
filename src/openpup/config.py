@@ -43,7 +43,11 @@ class Settings(BaseSettings):
     proactivity: str = Field("relentless", alias="OPENPUP_PROACTIVITY")
 
     # ---- Owner -----------------------------------------------------------
+    # Primary owner address (default destination for proactive outreach).
     owner_address: Optional[str] = Field(None, alias="OPENPUP_OWNER_ADDRESS")
+    # Additional owner addresses across platforms, comma-separated. The owner is
+    # recognized (and reachable) at ANY of these, e.g. "telegram:123,sms:+1555".
+    owner_addresses_raw: str = Field("", alias="OPENPUP_OWNER_ADDRESSES")
 
     # ---- Outbound comms governance --------------------------------------
     # open | contacts | owner_only -- who the agent may message.
@@ -127,11 +131,30 @@ class Settings(BaseSettings):
             return None
 
     def owner(self) -> Optional[Tuple[str, str]]:
-        """Return (platform, channel) the owner can be reached at, or None."""
+        """Return (platform, channel) of the PRIMARY owner address, or None."""
         if not self.owner_address or ":" not in self.owner_address:
             return None
         platform, channel = self.owner_address.split(":", 1)
         return platform.strip(), channel.strip()
+
+    @property
+    def owner_addresses(self) -> List[str]:
+        """All addresses that count as the owner (primary + extras), deduped."""
+        out: List[str] = []
+        if self.owner_address:
+            out.append(self.owner_address.strip())
+        for a in self.owner_addresses_raw.split(","):
+            a = a.strip()
+            if a and a not in out:
+                out.append(a)
+        return out
+
+    def owner_for_platform(self, platform: str) -> Optional[str]:
+        """Return the owner address on a given platform, if known."""
+        for a in self.owner_addresses:
+            if ":" in a and a.split(":", 1)[0].strip() == platform:
+                return a
+        return None
 
 
 @lru_cache(maxsize=1)
