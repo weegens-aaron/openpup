@@ -87,6 +87,33 @@ class EmailAdapter(PlatformAdapter):
                 envelopes.append(env)
         return envelopes
 
+    async def fetch_recent(self, limit: int = 5) -> List[dict]:
+        """Read the most recent emails WITHOUT marking them seen (read-only).
+
+        Returns a list of dicts: ``from_addr``, ``subject``, ``date``, ``preview``.
+        Used by the ``openpup_check_email`` agent tool.
+        """
+        return await asyncio.to_thread(self._fetch_recent_sync, limit)
+
+    def _fetch_recent_sync(self, limit: int) -> List[dict]:
+        from imap_tools import MailBox
+
+        out: List[dict] = []
+        with MailBox(self.settings.email_imap_host, self.settings.email_imap_port).login(
+            self.settings.email_username, self.settings.email_password
+        ) as mailbox:
+            for msg in mailbox.fetch(reverse=True, limit=limit, mark_seen=False):
+                body = msg.text or msg.html or ""
+                out.append(
+                    {
+                        "from_addr": msg.from_ or "",
+                        "subject": msg.subject or "",
+                        "date": str(msg.date) if msg.date else "",
+                        "preview": body[:500],
+                    }
+                )
+        return out
+
     async def send(self, envelope: Envelope) -> None:
         import aiosmtplib
 

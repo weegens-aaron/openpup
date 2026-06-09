@@ -34,9 +34,20 @@ class AgentHost:
     async def boot(self) -> None:
         """Load plugins (kennel et al.), fire startup hooks, load the agent."""
         from code_puppy.agents.agent_manager import load_agent
+        from code_puppy.callbacks import register_callback
         from code_puppy.plugins import load_plugin_callbacks
 
         load_plugin_callbacks()
+
+        # Give the agent OpenPup's own tools + identity so it can actually use
+        # the integrations (email, messaging) instead of acting like plain
+        # code-puppy. Same hook pattern the kennel uses.
+        from openpup import agent_tools
+
+        register_callback("register_tools", agent_tools.register_tools_callback)
+        register_callback("register_agent_tools", agent_tools.advertise_tools)
+        register_callback("load_prompt", agent_tools.openpup_identity_prompt)
+
         try:
             from code_puppy import callbacks
 

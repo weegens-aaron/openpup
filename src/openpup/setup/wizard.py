@@ -34,6 +34,8 @@ class CredField:
     key: str
     label: str
     secret: bool = False
+    # Strip all internal whitespace (e.g. Gmail app passwords shown as 4x4 groups).
+    strip_spaces: bool = False
 
 
 @dataclass
@@ -107,7 +109,7 @@ FLOWS: List[Flow] = [
             CredField("EMAIL_SMTP_HOST", "SMTP host"),
             CredField("EMAIL_SMTP_PORT", "SMTP port"),
             CredField("EMAIL_USERNAME", "Email address / username"),
-            CredField("EMAIL_PASSWORD", "App password", secret=True),
+            CredField("EMAIL_PASSWORD", "App password", secret=True, strip_spaces=True),
         ],
         validate=lambda v: validators.validate_email(
             v["EMAIL_IMAP_HOST"],
@@ -222,6 +224,8 @@ async def _run_flow(store: EnvStore, flow: Flow) -> None:
             console.print("[yellow]Cancelled.[/yellow]")
             return
         val = val.strip()
+        if fld.strip_spaces:
+            val = val.replace(" ", "")
         # keep existing secret if blank entered
         if not val and fld.secret and current:
             val = current
