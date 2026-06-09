@@ -59,6 +59,18 @@ class PlatformList(BaseModel):
     owner: Optional[str] = None
 
 
+class Contact(BaseModel):
+    platform: str
+    channel: str
+    name: str
+    address: str
+
+
+class ContactList(BaseModel):
+    contacts: List[Contact] = Field(default_factory=list)
+    count: int = 0
+
+
 # --------------------------------------------------------------------------
 # Tool registration functions (called with the pydantic agent at build time)
 # --------------------------------------------------------------------------
@@ -68,30 +80,49 @@ def register_send_message(agent: Any) -> None:
         """Send a message to someone on a connected platform.
 
         Args:
-            address: ``platform:channel`` target, e.g. ``telegram:12345``,
-                     ``discord:998877``, ``sms:+15551234567``,
-                     ``email:friend@example.com``.
+            address: A ``platform:channel`` target (``telegram:12345``,
+                     ``sms:+15551234567``, ``email:friend@example.com``) OR a
+                     known contact name (``Mike`` or ``telegram:Mike``). Use
+                     ``openpup_contacts`` to see who's reachable.
             text:    The message body to send.
 
-        Use ``openpup_list_platforms`` first if you're unsure which platforms
-        are connected or what the owner's address is.
+        Governed: owner-only, rate-limited per platform, and subject to the
+        configured send policy.
         """
+        from openpup.directory import get_directory
+        from openpup.governance import get_send_policy, redact
+
         if not _is_owner():
             return SendResult(
                 ok=False,
                 address=address,
                 error="Only the owner can send messages on OpenPup's behalf.",
             )
+        # Resolve a friendly contact name to an address when possible.
+        directory = get_directory()
+        resolved = directory.resolve(address) or address
+        if ":" not in resolved:
+            return SendResult(
+                ok=False,
+                address=address,
+                error=f"Couldn't resolve '{address}'. Use 'platform:channel' or a known "
+                "contact name (see openpup_contacts).",
+            )
+        platform = resolved.split(":", 1)[0]
         reg = get_registry()
-        if ":" not in address:
-            return SendResult(ok=False, address=address, error="address must be 'platform:channel'")
-        platform = address.split(":", 1)[0]
         if reg.get(platform) is None:
             return SendResult(
-                ok=False, address=address, error=f"platform '{platform}' is not connected"
+                ok=False, address=resolved, error=f"platform '{platform}' is not connected"
             )
-        ok = await reg.send(Envelope.to(address, text))
-        return SendResult(ok=ok, address=address, error=None if ok else "delivery failed")
+        # Governance: send policy + rate limit.
+        decision = get_send_policy().check(resolved, directory=directory)
+        if not decision.allowed:
+            return SendResult(ok=False, address=resolved, error=decision.reason)
+        try:
+            ok = await reg.send(Envelope.to(resolved, text))
+        except Exception as exc:  # noqa: BLE001
+            return SendResult(ok=False, address=resolved, error=redact(f"send failed: {exc!r}"))
+        return SendResult(ok=ok, address=resolved, error=None if ok else "delivery failed")
 
 
 def register_check_email(agent: Any) -> None:
@@ -135,10 +166,38 @@ def register_list_platforms(agent: Any) -> None:
         return PlatformList(platforms=reg.platforms(), owner=get_settings().owner_address)
 
 
+def register_contacts(agent: Any) -> None:
+    @agent.tool
+    async def openpup_contacts(context: RunContext, query: Optional[str] = None) -> ContactList:
+        """List or search known contacts OpenPup can message.
+
+        Contacts are learned automatically from people who message OpenPup. Use
+        this to find the right ``platform:channel`` address (or a name you can
+        pass straight to ``openpup_send_message``).
+
+        Args:
+            query: optional filter on name / channel / platform. Omit to list all.
+        """
+        from openpup.directory import get_directory
+
+        rows = get_directory().search(query)
+        contacts = [
+            Contact(
+                platform=c["platform"],
+                channel=c["channel"],
+                name=c.get("name", c["channel"]),
+                address=f"{c['platform']}:{c['channel']}",
+            )
+            for c in rows
+        ]
+        return ContactList(contacts=contacts, count=len(contacts))
+
+
 _TOOL_NAMES = (
     "openpup_send_message",
     "openpup_check_email",
     "openpup_list_platforms",
+    "openpup_contacts",
 )
 
 
@@ -148,6 +207,7 @@ def register_tools_callback() -> List[dict]:
         {"name": "openpup_send_message", "register_func": register_send_message},
         {"name": "openpup_check_email", "register_func": register_check_email},
         {"name": "openpup_list_platforms", "register_func": register_list_platforms},
+        {"name": "openpup_contacts", "register_func": register_contacts},
     ]
 
 

@@ -135,6 +135,27 @@ What's intentionally *not* copied: hermes's own run-loop (code-puppy already has
 one) and heavyweight subsystems (kanban/browser/tts). OpenPup's heartbeat +
 routines cover recurring autonomous work.
 
+## Comms tooling & governance (hermes-style)
+
+The agent gets a governed cross-platform messaging surface, ported in spirit
+from hermes-agent:
+
+- **Contact directory** — OpenPup learns who's reachable from every inbound
+  message (persisted to `~/.openpup/contacts.json`). The agent can
+  `openpup_contacts(query?)` to list/search them, and address people by **name**
+  (`Mike` or `telegram:Mike`) instead of raw chat ids — `openpup_send_message`
+  resolves names to addresses.
+- **Outbound governance:**
+  - **Owner-only** — only the owner can trigger sends (role-gated).
+  - **Send policy** (`OPENPUP_SEND_POLICY`): `open` / `contacts` (owner + known
+    contacts only) / `owner_only`.
+  - **Rate limiting** (`OPENPUP_SEND_RATE_PER_MIN`) — per-platform sliding
+    window defuses runaway loops / spam.
+  - **Secret redaction** — tokens/keys are scrubbed from tool error text.
+
+This complements inbound access control: `access.py` governs who may talk to
+OpenPup; `governance.py` governs who OpenPup may message, and how fast.
+
 ## Access control (owner + allowlists)
 
 OpenPup distinguishes **you (the owner)** from anyone else who messages the bot.

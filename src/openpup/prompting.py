@@ -181,8 +181,10 @@ def _capabilities_block() -> str:
             "# Your OpenPup capabilities",
             f"Connected platforms: {platform_str}. Owner address: {owner}.",
             "- openpup_list_platforms(): what's connected + the owner's address.",
+            "- openpup_contacts(query?): list/search people you can message.",
             "- openpup_check_email(limit): read recent email (owner-only).",
-            "- openpup_send_message(address, text): message a platform:channel (owner-only).",
+            "- openpup_send_message(address, text): message a platform:channel or a known",
+            "  contact name; owner-only, rate-limited, policy-governed.",
             "- openpup_todo(...): your task list for multi-step work.",
         ]
         try:

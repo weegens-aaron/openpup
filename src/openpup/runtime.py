@@ -16,6 +16,7 @@ from typing import List, Optional
 
 from openpup import access, memory
 from openpup.access import AccessControl, default_access_path
+from openpup.directory import get_directory
 from openpup.agent_host import AgentHost
 from openpup.config import Settings, get_settings
 from openpup.heartbeat.engine import Heartbeat
@@ -47,6 +48,12 @@ class OpenPup:
     # ---- inbound handling ------------------------------------------------
     async def handle_inbound(self, envelope: Envelope) -> None:
         """Route an inbound message to the agent and reply on the same channel."""
+        # Learn the sender as a known contact (powers the contact directory).
+        try:
+            get_directory().record(envelope.platform, envelope.channel, envelope.sender)
+        except Exception:
+            logger.debug("failed to record contact", exc_info=True)
+
         decision = self.access.check(envelope)
         logger.info(
             "Inbound from %s (%s) role=%s allowed=%s",

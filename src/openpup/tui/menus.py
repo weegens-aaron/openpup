@@ -74,6 +74,19 @@ SCHEMA: List[Section] = [
             Field(
                 "PUPPY_KENNEL_ROOT", "Kennel (memory) root", "text", help="Where memory is stored."
             ),
+            Field(
+                "OPENPUP_SEND_POLICY",
+                "Send policy",
+                "choice",
+                choices=["open", "contacts", "owner_only"],
+                help="Who the agent may message.",
+            ),
+            Field(
+                "OPENPUP_SEND_RATE_PER_MIN",
+                "Send rate / min",
+                "number",
+                help="Per-platform outbound cap per minute.",
+            ),
         ],
     ),
     Section(

@@ -98,6 +98,7 @@ def status() -> None:
     table.add_row("Reflection model", s.reflection_model or "(same as agent)")
     table.add_row("Universal Constructor", "on" if s.universal_constructor else "off")
     table.add_row("Owner", s.owner_address or "(unset)")
+    table.add_row("Send policy", f"{s.send_policy} ({s.send_rate_per_min}/min)")
     table.add_row("Kennel root", str(s.kennel_path))
     table.add_row("Heartbeat", "on" if s.heartbeat_enabled else "off")
     table.add_row("  interval", f"{s.heartbeat_interval}s +/-{s.heartbeat_jitter}s")

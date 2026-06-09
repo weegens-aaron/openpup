@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     # ---- Owner -----------------------------------------------------------
     owner_address: Optional[str] = Field(None, alias="OPENPUP_OWNER_ADDRESS")
 
+    # ---- Outbound comms governance --------------------------------------
+    # open | contacts | owner_only -- who the agent may message.
+    send_policy: str = Field("open", alias="OPENPUP_SEND_POLICY")
+    # Per-platform outbound message cap per minute (runaway/spam guard).
+    send_rate_per_min: int = Field(10, alias="OPENPUP_SEND_RATE_PER_MIN")
+
     # ---- Memory ----------------------------------------------------------
     kennel_root: str = Field("~/.openpup/kennel", alias="PUPPY_KENNEL_ROOT")
 

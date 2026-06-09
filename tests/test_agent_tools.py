@@ -41,6 +41,7 @@ def test_advertise_and_registry_shape(monkeypatch):
         "openpup_send_message",
         "openpup_check_email",
         "openpup_list_platforms",
+        "openpup_contacts",
     }
     # register_tools only defines OpenPup's own tools (not core's UC tool).
     defs = agent_tools.register_tools_callback()
@@ -140,6 +141,47 @@ async def test_check_email_blocked_for_non_owner(monkeypatch):
     result = await agent.tools["openpup_check_email"](None, 5)
     assert result.count == 0
     assert "owner" in result.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_send_message_resolves_contact_name(monkeypatch, tmp_path):
+    import openpup.directory as directory_mod
+    import openpup.governance as governance_mod
+    from openpup.directory import ContactDirectory
+    from openpup.governance import SendPolicy
+
+    reg = PlatformRegistry()
+    adapter = FakeAdapter("telegram")
+    reg.register(adapter)
+    monkeypatch.setattr(agent_tools, "get_registry", lambda: reg)
+
+    d = ContactDirectory(tmp_path / "contacts.json")
+    d.record("telegram", "111", "Mike")
+    monkeypatch.setattr(directory_mod, "get_directory", lambda: d)
+    monkeypatch.setattr(governance_mod, "get_send_policy", lambda: SendPolicy(per_minute=100))
+
+    agent = FakeAgent()
+    agent_tools.register_send_message(agent)
+    result = await agent.tools["openpup_send_message"](None, "Mike", "hi mike")
+    assert result.ok is True
+    assert result.address == "telegram:111"
+    assert adapter.sent[0].text == "hi mike"
+
+
+@pytest.mark.asyncio
+async def test_contacts_tool_lists(monkeypatch, tmp_path):
+    import openpup.directory as directory_mod
+    from openpup.directory import ContactDirectory
+
+    d = ContactDirectory(tmp_path / "contacts.json")
+    d.record("telegram", "111", "Mike")
+    monkeypatch.setattr(directory_mod, "get_directory", lambda: d)
+
+    agent = FakeAgent()
+    agent_tools.register_contacts(agent)
+    out = await agent.tools["openpup_contacts"](None)
+    assert out.count == 1
+    assert out.contacts[0].address == "telegram:111"
 
 
 @pytest.mark.asyncio
