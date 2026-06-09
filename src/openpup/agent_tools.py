@@ -134,8 +134,25 @@ def register_tools_callback() -> List[dict]:
 
 
 def advertise_tools(agent_name: Optional[str] = None) -> List[str]:
-    """``register_agent_tools`` hook — advertise OpenPup tools to the agent."""
-    return list(_TOOL_NAMES)
+    """``register_agent_tools`` hook — advertise OpenPup tools to the agent.
+
+    Also advertises code-puppy's ``universal_constructor`` meta-tool when it's
+    enabled, so the OpenPup agent can build its own tools at runtime. The core
+    silently skips it if the UC config flag is off, so advertising is safe.
+    """
+    names = list(_TOOL_NAMES)
+    if _uc_enabled():
+        names.append("universal_constructor")
+    return names
+
+
+def _uc_enabled() -> bool:
+    try:
+        from code_puppy.config import get_universal_constructor_enabled
+
+        return bool(get_universal_constructor_enabled())
+    except Exception:
+        return False
 
 
 def openpup_identity_prompt() -> Optional[str]:
@@ -157,7 +174,14 @@ def openpup_identity_prompt() -> Optional[str]:
             "- openpup_list_platforms(): see what's connected and the owner's address.\n"
             "- openpup_check_email(limit): read recent emails (only if email is connected).\n"
             "- openpup_send_message(address, text): message someone at 'platform:channel'.\n"
-            "When the user asks you to check email or message someone, USE these tools "
+            + (
+                "- universal_constructor(action, ...): BUILD YOUR OWN TOOLS in Python at "
+                "runtime (action=create/call/list/update/info). If you lack a capability, "
+                "construct it instead of refusing.\n"
+                if _uc_enabled()
+                else ""
+            )
+            + "When the user asks you to check email or message someone, USE these tools "
             "instead of saying you can't. If a platform isn't connected, say so plainly "
             "and suggest running 'openpup setup'."
         )

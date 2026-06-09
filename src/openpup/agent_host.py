@@ -22,9 +22,15 @@ logger = logging.getLogger("openpup.agent_host")
 class AgentHost:
     """Boots and drives a code-puppy agent for OpenPup."""
 
-    def __init__(self, agent_name: str = "code-puppy", default_model: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        agent_name: str = "code-puppy",
+        default_model: Optional[str] = None,
+        universal_constructor: bool = True,
+    ) -> None:
         self.agent_name = agent_name
         self.default_model = default_model
+        self.universal_constructor = universal_constructor
         self._agent: Any = None
         self._lock = asyncio.Lock()
         # address -> message history list
@@ -47,6 +53,16 @@ class AgentHost:
         register_callback("register_tools", agent_tools.register_tools_callback)
         register_callback("register_agent_tools", agent_tools.advertise_tools)
         register_callback("load_prompt", agent_tools.openpup_identity_prompt)
+
+        # Universal Constructor: let the agent forge its own tools at runtime.
+        # This is a core code-puppy capability gated by its own config flag;
+        # we flip it to match the OpenPup setting, and advertise the tool below.
+        try:
+            from code_puppy.config import set_universal_constructor_enabled
+
+            set_universal_constructor_enabled(self.universal_constructor)
+        except Exception:
+            logger.debug("could not set universal_constructor flag", exc_info=True)
 
         try:
             from code_puppy import callbacks

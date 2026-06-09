@@ -29,7 +29,11 @@ class OpenPup:
     def __init__(self, settings: Optional[Settings] = None) -> None:
         self.settings = settings or get_settings()
         self.registry = get_registry()
-        self.host = AgentHost(agent_name=self.settings.agent, default_model=self.settings.model)
+        self.host = AgentHost(
+            agent_name=self.settings.agent,
+            default_model=self.settings.model,
+            universal_constructor=self.settings.universal_constructor,
+        )
         self.adapters: List[PlatformAdapter] = []
         self.heartbeat: Optional[Heartbeat] = None
         self.webserver = None

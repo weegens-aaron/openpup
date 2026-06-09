@@ -34,6 +34,10 @@ agent into a persistent, reachable companion:
                                      puppy_kennel memory
 ```
 
+- The agent is code-puppy plus OpenPup's own tools: `openpup_check_email`,
+  `openpup_send_message`, `openpup_list_platforms`, and (optionally) the
+  **Universal Constructor** (`universal_constructor`) so it can build brand-new
+  tools for itself at runtime. So "check my email" or "text my owner" just work.
 - Every inbound message becomes a normalized **`Envelope`** and is routed
   through the agent; the reply goes back out on the same channel.
 - The **heartbeat** ticks on a jittered interval and runs whichever behaviors

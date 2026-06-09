@@ -54,6 +54,12 @@ SCHEMA: List[Section] = [
                 "model",
                 help="Cheap model for heartbeat ticks.",
             ),
+            Field(
+                "OPENPUP_UNIVERSAL_CONSTRUCTOR",
+                "Universal Constructor",
+                "bool",
+                help="Let the agent build its own tools at runtime.",
+            ),
         ],
     ),
     Section(

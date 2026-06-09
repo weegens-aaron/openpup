@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     agent: str = Field("code-puppy", alias="OPENPUP_AGENT")
     model: Optional[str] = Field(None, alias="OPENPUP_MODEL")
     reflection_model: Optional[str] = Field(None, alias="OPENPUP_REFLECTION_MODEL")
+    # Universal Constructor: let the agent build its own tools at runtime.
+    universal_constructor: bool = Field(True, alias="OPENPUP_UNIVERSAL_CONSTRUCTOR")
 
     # ---- Owner -----------------------------------------------------------
     owner_address: Optional[str] = Field(None, alias="OPENPUP_OWNER_ADDRESS")

@@ -28,15 +28,19 @@ class FakeAdapter:
         self.sent.append(envelope)
 
 
-def test_advertise_and_registry_shape():
-    assert set(agent_tools.advertise_tools()) == {
+def test_advertise_and_registry_shape(monkeypatch):
+    openpup_tools = {
         "openpup_send_message",
         "openpup_check_email",
         "openpup_list_platforms",
     }
+    # register_tools only defines OpenPup's own tools (not core's UC tool).
     defs = agent_tools.register_tools_callback()
-    assert {d["name"] for d in defs} == set(agent_tools.advertise_tools())
+    assert {d["name"] for d in defs} == openpup_tools
     assert all(callable(d["register_func"]) for d in defs)
+    # advertise always includes OpenPup's tools (plus UC when enabled).
+    monkeypatch.setattr(agent_tools, "_uc_enabled", lambda: False)
+    assert set(agent_tools.advertise_tools()) == openpup_tools
 
 
 def test_identity_prompt_mentions_openpup():
