@@ -73,7 +73,7 @@ class OpenPup:
             return
 
         access.set_current_role(decision.role)
-        prompt = self._role_prefix(envelope, decision.role) + envelope.text
+        prompt = self._context_prefix(envelope, decision.role) + envelope.text
         try:
             reply = await self.host.run(prompt, conversation=envelope.address)
         except Exception:
@@ -82,25 +82,36 @@ class OpenPup:
 
         if reply and reply.strip():
             await self.registry.send(envelope.reply(reply))
-        # Record the exchange for the heartbeat's memory-driven behaviors.
-        memory.remember(
-            f"[{envelope.platform}] {envelope.sender}: {envelope.text}\n-> {reply}",
-            wing=memory.AGENT_WING,
-            room="conversations",
+        # Record the exchange in THIS person's own memory wing, so the pup
+        # builds a memory profile of everyone it talks to.
+        who = envelope.sender or envelope.channel
+        memory.remember_about_contact(
+            envelope.address,
+            f"{who}: {envelope.text}\n-> {reply}",
+            name=envelope.sender,
         )
 
     @staticmethod
-    def _role_prefix(envelope: Envelope, role: str) -> str:
-        """A short context note telling the agent who it's talking to."""
-        if role == access.OWNER:
-            return "[This message is from your OWNER. Full access granted.]\n\n"
+    def _context_prefix(envelope: Envelope, role: str) -> str:
+        """Per-message context: who it's from + what we remember about them."""
         who = envelope.sender or envelope.channel
-        return (
-            f"[This message is from {who}, a NON-owner user on {envelope.platform}. "
-            "Be friendly and helpful, but DO NOT use owner-only tools "
-            "(reading the owner's email, sending messages on the owner's behalf, "
-            "or anything that touches the owner's private data).]\n\n"
-        )
+        if role == access.OWNER:
+            lines = ["[This message is from your OWNER. Full access granted.]"]
+        else:
+            lines = [
+                f"[This message is from {who} ({envelope.address}), a NON-owner user. "
+                "Be friendly and helpful, but DO NOT use owner-only tools "
+                "(the owner's email, sending on their behalf, their private data).]"
+            ]
+        # Inject what we already know about this specific person.
+        try:
+            facts = memory.recent_about_contact(envelope.address, top_k=3)
+            if facts:
+                lines.append(f"What you remember about {who}:")
+                lines.extend(f"- {f}" for f in facts)
+        except Exception:
+            logger.debug("contact recall failed", exc_info=True)
+        return "\n".join(lines) + "\n\n"
 
     # ---- lifecycle -------------------------------------------------------
     async def start(self) -> None:

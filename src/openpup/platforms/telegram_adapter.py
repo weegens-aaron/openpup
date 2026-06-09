@@ -25,14 +25,28 @@ class TelegramAdapter(PlatformAdapter):
         self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message))
         self._started = False
 
-    async def _on_message(self, update, context) -> None:  # pragma: no cover - live
+    async def _on_message(self, update, context) -> None:
         msg = update.effective_message
         if msg is None or not msg.text:
             return
+        user = update.effective_user
+        # Telegram usernames are often absent; build a stable display name from
+        # the always-present first/last name, and keep the numeric id as the
+        # stable identifier.
+        name = None
+        sender_id = None
+        if user is not None:
+            name = (
+                getattr(user, "full_name", None)
+                or getattr(user, "username", None)
+                or (str(user.id) if getattr(user, "id", None) else None)
+            )
+            sender_id = str(user.id) if getattr(user, "id", None) else None
         envelope = Envelope(
             platform=self.name,
             channel=str(update.effective_chat.id),
-            sender=(update.effective_user.username if update.effective_user else None),
+            sender=name,
+            sender_id=sender_id,
             text=msg.text,
         )
         await self.registry.dispatch_inbound(envelope)

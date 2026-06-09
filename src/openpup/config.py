@@ -19,6 +19,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Load .env once at import so plain os.environ readers (e.g. the kennel) see it.
 load_dotenv()
 
+# IMPORTANT: code-puppy's puppy_kennel reads PUPPY_KENNEL_ROOT at *import time*
+# and does NOT expand ``~``. ``load_dotenv`` leaves a literal "~/.openpup/kennel"
+# in the environment, which would resolve to a broken relative path -- or, if
+# read before we set it, fall back to code-puppy's OWN kennel (~/.code_puppy/
+# kennel), silently sharing memory. So we normalize it to an absolute path here,
+# at OpenPup-config import (which happens before the kennel is ever imported),
+# defaulting to OpenPup's own kennel so the two stay separate.
+_kennel_root = os.environ.get("PUPPY_KENNEL_ROOT") or "~/.openpup/kennel"
+os.environ["PUPPY_KENNEL_ROOT"] = str(
+    Path(os.path.expanduser(os.path.expandvars(_kennel_root))).resolve()
+)
+
 
 def _expand(path: str) -> Path:
     return Path(os.path.expanduser(os.path.expandvars(path))).resolve()
@@ -165,7 +177,8 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return the process-wide settings singleton."""
-    # Point the kennel at OpenPup's root before any code-puppy import reads it.
     settings = Settings()
-    os.environ.setdefault("PUPPY_KENNEL_ROOT", str(settings.kennel_path))
+    # Force the kennel at OpenPup's (expanded, absolute) root. Force-set rather
+    # than setdefault so a literal-tilde value from .env can't win.
+    os.environ["PUPPY_KENNEL_ROOT"] = str(settings.kennel_path)
     return settings
