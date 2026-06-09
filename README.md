@@ -116,6 +116,32 @@ openpup routine add digest "Summarize today's AI news" \
 openpup routine list
 ```
 
+## Access control (owner + allowlists)
+
+OpenPup distinguishes **you (the owner)** from anyone else who messages the bot.
+The owner is your `OPENPUP_OWNER_ADDRESS` (`platform:channel`). Privileged tools
+(reading your email, sending messages on your behalf) are **owner-only**; the
+agent is told per-message whether it's talking to you or a stranger.
+
+Each platform has an access **mode**:
+
+| Mode | Who can interact |
+|------|------------------|
+| `open` (default) | anyone (but the owner is still distinguished) |
+| `allowlist` | the owner + allow-listed senders |
+| `owner_only` | only the owner |
+
+```bash
+openpup access list                          # show owner + policies
+openpup access owner telegram:12345          # mark yourself as owner
+openpup access allow telegram 67890          # whitelist a friend (-> allowlist mode)
+openpup access mode telegram allowlist       # lock telegram to owner + allowlist
+openpup access deny telegram 67890           # remove someone
+```
+
+Senders are matched by chat id / phone / email / user id, so it works across
+platforms. Policies persist to `~/.openpup/access.json`.
+
 ## The heartbeat behaviors
 
 Configured via `OPENPUP_HEARTBEAT_BEHAVIORS` (comma-separated):

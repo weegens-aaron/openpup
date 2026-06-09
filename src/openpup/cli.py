@@ -25,8 +25,10 @@ from openpup.config import get_settings
 app = typer.Typer(help="OpenPup - an always-on AI companion.", no_args_is_help=True)
 memory_app = typer.Typer(help="Inspect OpenPup's memory (puppy_kennel).")
 routine_app = typer.Typer(help="Manage scheduled routines.")
+access_app = typer.Typer(help="Manage who can talk to OpenPup (owner + allowlists).")
 app.add_typer(memory_app, name="memory")
 app.add_typer(routine_app, name="routine")
+app.add_typer(access_app, name="access")
 
 console = Console()
 
@@ -205,6 +207,72 @@ def routine_add(
     sched = Scheduler.load(s.state_dir / "routines.json")
     sched.add(Routine(name=name, prompt=prompt, deliver=deliver, every=every, daily=daily))
     console.print(f"[green]added routine '{name}'[/green]")
+
+
+@access_app.command("list")
+def access_list() -> None:
+    """Show the owner and per-platform access policies."""
+    from openpup.access import AccessControl, default_access_path
+
+    s = get_settings()
+    ac = AccessControl(default_access_path(s.state_dir), owner_address=s.owner_address)
+    console.print(ac.describe())
+
+
+@access_app.command("owner")
+def access_owner(address: str) -> None:
+    """Set the owner address (platform:channel), written to .env."""
+    from pathlib import Path
+
+    from openpup.tui.env_store import EnvStore
+
+    if ":" not in address:
+        console.print("[red]Address must be 'platform:channel', e.g. telegram:12345[/red]")
+        raise typer.Exit(1)
+    store = EnvStore(Path.cwd() / ".env")
+    store.set("OPENPUP_OWNER_ADDRESS", address)
+    store.save()
+    console.print(f"[green]Owner set to {address}[/green]")
+
+
+@access_app.command("allow")
+def access_allow(platform: str, identifier: str) -> None:
+    """Allow a sender on a platform (chat id / phone / email / user id)."""
+    from openpup.access import AccessControl, default_access_path
+
+    s = get_settings()
+    ac = AccessControl(default_access_path(s.state_dir), owner_address=s.owner_address)
+    ac.allow(platform, identifier)
+    console.print(f"[green]Allowed {identifier} on {platform} (mode now allowlist).[/green]")
+
+
+@access_app.command("deny")
+def access_deny(platform: str, identifier: str) -> None:
+    """Remove a sender from a platform's allowlist."""
+    from openpup.access import AccessControl, default_access_path
+
+    s = get_settings()
+    ac = AccessControl(default_access_path(s.state_dir), owner_address=s.owner_address)
+    ok = ac.deny(platform, identifier)
+    console.print(
+        f"[green]Removed {identifier} from {platform}.[/green]"
+        if ok
+        else f"[yellow]{identifier} was not on {platform}'s allowlist.[/yellow]"
+    )
+
+
+@access_app.command("mode")
+def access_mode(platform: str, mode: str) -> None:
+    """Set a platform's access mode: open | allowlist | owner_only."""
+    from openpup.access import MODES, AccessControl, default_access_path
+
+    if mode not in MODES:
+        console.print(f"[red]mode must be one of: {', '.join(MODES)}[/red]")
+        raise typer.Exit(1)
+    s = get_settings()
+    ac = AccessControl(default_access_path(s.state_dir), owner_address=s.owner_address)
+    ac.set_mode(platform, mode)
+    console.print(f"[green]{platform} access mode set to {mode}.[/green]")
 
 
 @routine_app.command("rm")

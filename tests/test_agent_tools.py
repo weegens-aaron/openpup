@@ -4,8 +4,16 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from openpup import agent_tools
+from openpup import access, agent_tools
 from openpup.messaging.registry import PlatformRegistry
+
+
+@pytest.fixture(autouse=True)
+def _as_owner():
+    """Default tests to owner privileges; individual tests can override."""
+    access.set_current_role(access.OWNER)
+    yield
+    access.set_current_role(access.ALLOWED)
 
 
 class FakeAgent:
@@ -113,6 +121,31 @@ async def test_check_email_returns_items(monkeypatch):
     result = await agent.tools["openpup_check_email"](None, 5)
     assert result.count == 1
     assert result.emails[0].subject == "Hi"
+
+
+@pytest.mark.asyncio
+async def test_send_message_blocked_for_non_owner(monkeypatch):
+    reg = PlatformRegistry()
+    reg.register(FakeAdapter("telegram"))
+    monkeypatch.setattr(agent_tools, "get_registry", lambda: reg)
+    access.set_current_role(access.ALLOWED)  # non-owner
+    agent = FakeAgent()
+    agent_tools.register_send_message(agent)
+    result = await agent.tools["openpup_send_message"](None, "telegram:1", "hi")
+    assert result.ok is False
+    assert "owner" in result.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_check_email_blocked_for_non_owner(monkeypatch):
+    reg = PlatformRegistry()
+    monkeypatch.setattr(agent_tools, "get_registry", lambda: reg)
+    access.set_current_role(access.ALLOWED)  # non-owner
+    agent = FakeAgent()
+    agent_tools.register_check_email(agent)
+    result = await agent.tools["openpup_check_email"](None, 5)
+    assert result.count == 0
+    assert "owner" in result.error.lower()
 
 
 @pytest.mark.asyncio

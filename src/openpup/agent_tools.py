@@ -22,6 +22,16 @@ from openpup.messaging.envelope import Envelope
 from openpup.messaging.registry import get_registry
 
 
+def _is_owner() -> bool:
+    """Whether the message currently being served is from the owner."""
+    try:
+        from openpup.access import current_is_owner
+
+        return current_is_owner()
+    except Exception:
+        return True  # fail open in non-OpenPup contexts (e.g. unit tests)
+
+
 # --------------------------------------------------------------------------
 # Output models
 # --------------------------------------------------------------------------
@@ -66,6 +76,12 @@ def register_send_message(agent: Any) -> None:
         Use ``openpup_list_platforms`` first if you're unsure which platforms
         are connected or what the owner's address is.
         """
+        if not _is_owner():
+            return SendResult(
+                ok=False,
+                address=address,
+                error="Only the owner can send messages on OpenPup's behalf.",
+            )
         reg = get_registry()
         if ":" not in address:
             return SendResult(ok=False, address=address, error="address must be 'platform:channel'")
@@ -89,6 +105,8 @@ def register_check_email(agent: Any) -> None:
         Args:
             limit: How many recent emails to fetch (1-20, default 5).
         """
+        if not _is_owner():
+            return EmailList(count=0, error="Only the owner can read the mailbox.")
         reg = get_registry()
         adapter = reg.get("email")
         if adapter is None:

@@ -74,6 +74,11 @@ class Heartbeat:
         """Run one heartbeat tick: every enabled behavior, fault-isolated."""
         self.tick_count += 1
         self.last_tick = time.time()
+        # Heartbeat behaviors act on the owner's behalf -> owner privileges,
+        # so agent runs here may use owner-only tools (email, messaging).
+        from openpup import access
+
+        access.set_current_role(access.OWNER)
         behaviors = self.settings.behaviors
         logger.debug("Heartbeat tick #%d: %s", self.tick_count, behaviors)
 

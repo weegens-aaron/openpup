@@ -58,10 +58,12 @@ class DiscordAdapter(PlatformAdapter):
         mentioned = self._client.user in getattr(message, "mentions", [])
         if not (is_dm or mentioned):
             return None
+        author_id = getattr(message.author, "id", None)
         return Envelope(
             platform=self.name,
             channel=str(message.channel.id),
             sender=str(message.author),
+            sender_id=str(author_id) if author_id is not None else None,
             text=message.content or "",
         )
 

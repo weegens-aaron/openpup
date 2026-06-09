@@ -31,6 +31,9 @@ class Envelope(BaseModel):
     channel: str = ""
     # Who sent it (inbound) — display name or handle.
     sender: Optional[str] = None
+    # Stable identifier for the sender used by access control (e.g. a Discord
+    # user id). Falls back to ``channel``/``sender`` when unset.
+    sender_id: Optional[str] = None
     # Optional reply/thread anchor for platforms that support threads.
     thread_id: Optional[str] = None
     text: str = ""

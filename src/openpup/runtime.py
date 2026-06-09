@@ -14,7 +14,8 @@ import asyncio
 import logging
 from typing import List, Optional
 
-from openpup import memory
+from openpup import access, memory
+from openpup.access import AccessControl, default_access_path
 from openpup.agent_host import AgentHost
 from openpup.config import Settings, get_settings
 from openpup.heartbeat.engine import Heartbeat
@@ -38,13 +39,35 @@ class OpenPup:
         self.heartbeat: Optional[Heartbeat] = None
         self.webserver = None
         self._stop = asyncio.Event()
+        self.access = AccessControl(
+            default_access_path(self.settings.state_dir),
+            owner_address=self.settings.owner_address,
+        )
 
     # ---- inbound handling ------------------------------------------------
     async def handle_inbound(self, envelope: Envelope) -> None:
         """Route an inbound message to the agent and reply on the same channel."""
-        logger.info("Inbound from %s (%s)", envelope.address, envelope.sender)
+        decision = self.access.check(envelope)
+        logger.info(
+            "Inbound from %s (%s) role=%s allowed=%s",
+            envelope.address,
+            envelope.sender,
+            decision.role,
+            decision.allowed,
+        )
+        if not decision.allowed:
+            logger.warning(
+                "Blocked message from %s (%s): %s",
+                envelope.address,
+                envelope.sender,
+                decision.reason,
+            )
+            return
+
+        access.set_current_role(decision.role)
+        prompt = self._role_prefix(envelope, decision.role) + envelope.text
         try:
-            reply = await self.host.run(envelope.text, conversation=envelope.address)
+            reply = await self.host.run(prompt, conversation=envelope.address)
         except Exception:
             logger.exception("Agent failed handling inbound message")
             reply = "Sorry — I hit an error processing that."
@@ -56,6 +79,19 @@ class OpenPup:
             f"[{envelope.platform}] {envelope.sender}: {envelope.text}\n-> {reply}",
             wing=memory.AGENT_WING,
             room="conversations",
+        )
+
+    @staticmethod
+    def _role_prefix(envelope: Envelope, role: str) -> str:
+        """A short context note telling the agent who it's talking to."""
+        if role == access.OWNER:
+            return "[This message is from your OWNER. Full access granted.]\n\n"
+        who = envelope.sender or envelope.channel
+        return (
+            f"[This message is from {who}, a NON-owner user on {envelope.platform}. "
+            "Be friendly and helpful, but DO NOT use owner-only tools "
+            "(reading the owner's email, sending messages on the owner's behalf, "
+            "or anything that touches the owner's private data).]\n\n"
         )
 
     # ---- lifecycle -------------------------------------------------------
