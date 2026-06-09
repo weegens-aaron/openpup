@@ -33,8 +33,10 @@ class Heartbeat:
         # Shared singleton so jobs the agent schedules are picked up live.
         self.scheduler = scheduler or get_scheduler()
         self._task: Optional[asyncio.Task] = None
+        self._fast_task: Optional[asyncio.Task] = None
         self._stop = asyncio.Event()
         self.tick_count = 0
+        self.fast_tick_count = 0
         self.last_tick: float = 0.0
 
     # ---- lifecycle -------------------------------------------------------
@@ -43,21 +45,27 @@ class Heartbeat:
             logger.info("Heartbeat disabled by config")
             return
         self._stop.clear()
+        # Slow loop: reflect + outreach (the 'thinking' behaviors).
         self._task = asyncio.create_task(self._loop())
+        # Fast loop: scheduler + inbound polling, so reminders/jobs fire on time.
+        self._fast_task = asyncio.create_task(self._fast_loop())
         logger.info(
-            "Heartbeat started: every %ss (+/-%ss), behaviors=%s",
+            "Heartbeat started: reflect/outreach every %ss (+/-%ss); scheduler+inbound "
+            "every %ss; behaviors=%s",
             self.settings.heartbeat_interval,
             self.settings.heartbeat_jitter,
+            self.settings.scheduler_interval,
             self.settings.behaviors,
         )
 
     async def stop(self) -> None:
         self._stop.set()
-        if self._task:
-            self._task.cancel()
+        for task in (self._task, self._fast_task):
+            if task:
+                task.cancel()
         logger.info("Heartbeat stopped after %d ticks", self.tick_count)
 
-    # ---- loop ------------------------------------------------------------
+    # ---- loops -----------------------------------------------------------
     def _next_delay(self) -> float:
         jitter = random.uniform(-self.settings.heartbeat_jitter, self.settings.heartbeat_jitter)
         return max(5.0, self.settings.heartbeat_interval + jitter)
@@ -71,8 +79,37 @@ class Heartbeat:
                 pass
             await self.tick()
 
+    async def _fast_loop(self) -> None:
+        interval = max(5, self.settings.scheduler_interval)
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=interval)
+                break  # stop was set
+            except asyncio.TimeoutError:
+                pass
+            await self.fast_tick()
+
+    async def fast_tick(self) -> None:
+        """Frequent, cheap tick: fire due scheduled jobs + poll inbound."""
+        self.fast_tick_count += 1
+        from openpup import access
+
+        access.set_current_role(access.OWNER)
+        behaviors = self.settings.behaviors
+        if "inbound" in behaviors:
+            await self._safe(self._poll_inbound(), "inbound")
+        if "routines" in behaviors:
+            await self._safe(
+                routines.run_due_routines(self.host, self.settings, self.registry, self.scheduler),
+                "routines",
+            )
+
     async def tick(self) -> None:
-        """Run one heartbeat tick: every enabled behavior, fault-isolated."""
+        """Run one (slow) heartbeat tick: every enabled behavior, fault-isolated.
+
+        Includes the fast behaviors too, so a manual ``tick()`` (tests / CLI)
+        still exercises everything.
+        """
         self.tick_count += 1
         self.last_tick = time.time()
         # Heartbeat behaviors act on the owner's behalf -> owner privileges,

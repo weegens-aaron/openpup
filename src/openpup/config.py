@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     heartbeat_enabled: bool = Field(True, alias="OPENPUP_HEARTBEAT_ENABLED")
     heartbeat_interval: int = Field(900, alias="OPENPUP_HEARTBEAT_INTERVAL")
     heartbeat_jitter: int = Field(120, alias="OPENPUP_HEARTBEAT_JITTER")
+    # How often to check the scheduler + poll inbound adapters. This is
+    # decoupled from the (slow) reflect/outreach heartbeat so reminders fire
+    # promptly instead of waiting up to a full heartbeat interval.
+    scheduler_interval: int = Field(30, alias="OPENPUP_SCHEDULER_INTERVAL")
     heartbeat_behaviors: str = Field(
         "reflect,outreach,routines,inbound", alias="OPENPUP_HEARTBEAT_BEHAVIORS"
     )

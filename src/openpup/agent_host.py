@@ -18,6 +18,50 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("openpup.agent_host")
 
+# Substrings / type names that indicate a transient network/streaming hiccup
+# with the model API (worth retrying) rather than a real logic error.
+_TRANSIENT_SIGNATURES = (
+    "peer closed connection",
+    "incomplete chunked read",
+    "remoteprotocolerror",
+    "readerror",
+    "connecterror",
+    "connectionerror",
+    "readtimeout",
+    "connecttimeout",
+    "connection reset",
+    "server disconnected",
+    "serverdisconnected",
+    "apiconnectionerror",
+    "overloaded",
+    "internalservererror",
+    "502",
+    "503",
+    "529",
+    "streamed response ended",
+)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """True if any error in the cause/context/group chain looks transient."""
+    seen: List[BaseException] = []
+
+    def collect(e: Optional[BaseException]) -> None:
+        if e is None or e in seen:
+            return
+        seen.append(e)
+        collect(getattr(e, "__cause__", None))
+        collect(getattr(e, "__context__", None))
+        for sub in getattr(e, "exceptions", None) or []:  # ExceptionGroup
+            collect(sub)
+
+    collect(exc)
+    for e in seen:
+        blob = f"{type(e).__name__} {e}".lower()
+        if any(sig in blob for sig in _TRANSIENT_SIGNATURES):
+            return True
+    return False
+
 
 class AgentHost:
     """Boots and drives a code-puppy agent for OpenPup."""
@@ -27,10 +71,12 @@ class AgentHost:
         agent_name: str = "code-puppy",
         default_model: Optional[str] = None,
         universal_constructor: bool = True,
+        max_retries: int = 3,
     ) -> None:
         self.agent_name = agent_name
         self.default_model = default_model
         self.universal_constructor = universal_constructor
+        self.max_retries = max_retries
         self._agent: Any = None
         self._lock = asyncio.Lock()
         # address -> message history list
@@ -116,18 +162,35 @@ class AgentHost:
 
         async with self._lock:
             history = self._histories.get(conversation, [])
-            self._agent.set_message_history(list(history))
-
             effective_model = model or self.default_model
-            try:
-                if effective_model:
-                    with self._agent.temporary_model_name_override(effective_model):
+
+            attempts = max(1, self.max_retries)
+            for attempt in range(1, attempts + 1):
+                # Reset to the clean stored history each attempt: a failed
+                # streaming run can leave the agent's in-place history dirty.
+                self._agent.set_message_history(list(history))
+                try:
+                    if effective_model:
+                        with self._agent.temporary_model_name_override(effective_model):
+                            result = await self._agent.run_with_mcp(prompt)
+                    else:
                         result = await self._agent.run_with_mcp(prompt)
-                else:
-                    result = await self._agent.run_with_mcp(prompt)
-            except Exception:
-                logger.exception("Agent run failed for conversation '%s'", conversation)
-                raise
+                    break
+                except Exception as exc:
+                    if attempt < attempts and _is_transient(exc):
+                        delay = min(8.0, 1.5 * attempt)
+                        logger.warning(
+                            "Transient agent error (attempt %d/%d) for '%s': %s; retrying in %.1fs",
+                            attempt,
+                            attempts,
+                            conversation,
+                            exc,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.exception("Agent run failed for conversation '%s'", conversation)
+                    raise
 
             if keep_history:
                 self._histories[conversation] = list(self._agent.get_message_history())

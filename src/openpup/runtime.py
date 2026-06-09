@@ -77,9 +77,14 @@ class OpenPup:
         prompt = self._context_prefix(envelope, decision.role) + envelope.text
         try:
             reply = await self.host.run(prompt, conversation=envelope.address)
-        except Exception:
+        except Exception as exc:
+            from openpup.agent_host import _is_transient
+
             logger.exception("Agent failed handling inbound message")
-            reply = "Sorry — I hit an error processing that."
+            if _is_transient(exc):
+                reply = "My connection hiccuped mid-thought — give me another shot?"
+            else:
+                reply = "Sorry — I hit an error processing that."
 
         if reply and reply.strip():
             await self.registry.send(envelope.reply(reply))
