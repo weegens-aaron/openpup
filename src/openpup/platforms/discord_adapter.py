@@ -74,6 +74,25 @@ class DiscordAdapter(PlatformAdapter):
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._client.start(self.settings.discord_bot_token))
+        # The gateway handshake runs in the background task above. We must not
+        # return until the client is actually ready, otherwise an immediate
+        # outbound send (e.g. the `say` one-off command) races ahead of
+        # discord.py's HTTP setup and explodes on an uninitialised internal
+        # event. Bounded so a bad token / network stall fails fast instead of
+        # hanging forever.
+        ready = asyncio.ensure_future(self._client.wait_until_ready())
+        done, _ = await asyncio.wait(
+            {ready, self._task}, timeout=30, return_when=asyncio.FIRST_COMPLETED
+        )
+        if self._task in done:
+            # start() finished/failed before we ever became ready -> surface it.
+            ready.cancel()
+            exc = self._task.exception()
+            if exc is not None:
+                raise exc
+        elif ready not in done:
+            ready.cancel()
+            logger.warning("Discord client not ready within 30s; continuing anyway")
         logger.info("Discord adapter started")
 
     async def stop(self) -> None:
@@ -85,11 +104,26 @@ class DiscordAdapter(PlatformAdapter):
         logger.info("Discord adapter stopped")
 
     async def send(self, envelope: Envelope) -> None:  # pragma: no cover - needs gateway
-        channel = self._client.get_channel(int(envelope.channel))
+        target_id = int(envelope.channel)
+        channel = self._client.get_channel(target_id)
         if channel is None:
-            channel = await self._client.fetch_channel(int(envelope.channel))
+            channel = await self._resolve_target(target_id)
         for chunk in _chunk(envelope.text, 1900):
             await channel.send(chunk)
+
+    async def _resolve_target(self, target_id: int):
+        """Resolve an id that may be a channel OR a user.
+
+        Outbound addresses like ``discord:<user_id>`` (e.g. the owner) should
+        Just Work, so if the id isn't a channel we can fetch, fall back to
+        treating it as a user and opening a DM channel with them.
+        """
+        discord = self._discord
+        try:
+            return await self._client.fetch_channel(target_id)
+        except (discord.NotFound, discord.Forbidden, discord.InvalidData):
+            user = self._client.get_user(target_id) or await self._client.fetch_user(target_id)
+            return user.dm_channel or await user.create_dm()
 
 
 def _chunk(text: str, size: int):
