@@ -23,8 +23,17 @@ _HTTP_LOGGERS = ("httpx", "httpcore", "hpack", "h2")
 #: Chatty platform SDKs whose INFO lines are noise ("logging in using static
 #: token", "Application started", ...). Keep their warnings/errors, drop INFO.
 _CHAT_LOGGERS = ("discord", "discord.client", "telegram", "telegram.ext")
+#: code-puppy's OAuth model-loaders re-emit "Loaded/Filtered N models" on every
+#: agent (re)build -- so a single streaming retry storm reprints them many
+#: times. Pure operational noise; clamp to WARNING.
+_MODEL_LOADER_LOGGERS = (
+    "code_puppy.plugins.claude_code_oauth",
+    "code_puppy.plugins.chatgpt_oauth",
+    "code_puppy.plugins.gemini_oauth",
+    "code_puppy.plugins.copilot_oauth",
+)
 #: Everything we clamp to WARNING so it stops spamming INFO at the owner.
-NOISY_LOGGERS = _HTTP_LOGGERS + _CHAT_LOGGERS
+NOISY_LOGGERS = _HTTP_LOGGERS + _CHAT_LOGGERS + _MODEL_LOADER_LOGGERS
 
 _DATE_FORMAT = "%H:%M:%S"
 

@@ -150,6 +150,17 @@ class TestTelegram:
         await adapter.send(Envelope.to("telegram:555", "hi there"))
         adapter._app.bot.send_message.assert_awaited_once_with(chat_id=555, text="hi there")
 
+    @pytest.mark.asyncio
+    async def test_typing_sends_chat_action(self):
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        adapter._app = MagicMock()
+        adapter._app.bot.send_chat_action = AsyncMock()
+        await adapter.typing("555")
+        adapter._app.bot.send_chat_action.assert_awaited_once()
+        kwargs = adapter._app.bot.send_chat_action.call_args.kwargs
+        assert kwargs["chat_id"] == 555
+
 
 # =============================================================================
 # WhatsApp

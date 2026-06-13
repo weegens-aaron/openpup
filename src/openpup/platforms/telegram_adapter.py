@@ -73,6 +73,16 @@ class TelegramAdapter(PlatformAdapter):
         for chunk in _chunk(envelope.text, 4000):
             await self._app.bot.send_message(chat_id=int(envelope.channel), text=chunk)
 
+    async def typing(self, channel: str) -> None:
+        """Show the Telegram 'typing...' action so the user knows the pup is
+        working -- especially during slow runs / transient-error retries, which
+        would otherwise look like dead silence. The action auto-expires after a
+        few seconds, so the runtime re-pokes it on a keepalive loop.
+        """
+        from telegram.constants import ChatAction
+
+        await self._app.bot.send_chat_action(chat_id=int(channel), action=ChatAction.TYPING)
+
 
 def _chunk(text: str, size: int):
     text = text or ""

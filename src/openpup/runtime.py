@@ -113,6 +113,10 @@ class OpenPup:
         transcripts.record_turn(session_id, envelope.address, "user", envelope.text)
 
         prompt = self._context_prefix(envelope, role) + envelope.text
+        # Show a "typing..." indicator (where the platform supports it) for the
+        # whole run, so slow turns -- including transient LLM-streaming retries
+        # -- look like the pup thinking, not a dead bot.
+        typing = self._start_typing(envelope)
         try:
             reply = await self.host.run(prompt, conversation=envelope.address)
         except Exception as exc:
@@ -123,6 +127,8 @@ class OpenPup:
                 reply = "My connection hiccuped mid-thought — give me another shot?"
             else:
                 reply = "Sorry — I hit an error processing that."
+        finally:
+            await self._stop_typing(typing)
 
         transcripts.record_turn(session_id, envelope.address, "assistant", reply)
         if reply and reply.strip():
@@ -135,6 +141,44 @@ class OpenPup:
             f"{who}: {envelope.text}\n-> {reply}",
             name=envelope.sender,
         )
+
+    # ---- typing indicator ------------------------------------------------
+    #: How often to re-poke the platform's typing action (it auto-expires).
+    _TYPING_INTERVAL_S = 4.0
+
+    def _start_typing(self, envelope: Envelope) -> Optional[asyncio.Task]:
+        """Start a keepalive task showing 'typing...' until cancelled.
+
+        No-op (returns None) for platforms whose adapter doesn't implement an
+        async ``typing(channel)`` method, so this stays opt-in per adapter.
+        """
+        adapter = self.registry.get(envelope.platform)
+        action = getattr(adapter, "typing", None)
+        if action is None:
+            return None
+
+        async def _loop() -> None:
+            try:
+                while True:
+                    try:
+                        await action(envelope.channel)
+                    except Exception:
+                        logger.debug("typing action failed", exc_info=True)
+                    await asyncio.sleep(self._TYPING_INTERVAL_S)
+            except asyncio.CancelledError:
+                pass
+
+        return asyncio.create_task(_loop())
+
+    @staticmethod
+    async def _stop_typing(task: Optional[asyncio.Task]) -> None:
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     def _context_prefix(self, envelope: Envelope, role: str) -> str:
         """Per-message context: who it's from + what we remember about them."""
