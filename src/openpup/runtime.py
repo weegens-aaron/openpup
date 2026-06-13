@@ -234,7 +234,7 @@ class OpenPup:
         self.heartbeat = Heartbeat(self.host, self.settings, self.registry)
         await self.heartbeat.start()
 
-        logger.info("%s is awake. ", self.settings.name)
+        logger.info("%s HAS ARISEN!!!!! ALL HAIL THE MOST OPEN OF ALL PUPS!!!!", self.settings.name)
 
     async def stop(self) -> None:
         logger.info("Shutting down ...")
