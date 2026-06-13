@@ -36,6 +36,7 @@ telegram = ["python-telegram-bot>=21.0"]
 email = ["aiosmtplib>=3.0.0", "imap-tools>=1.5.0"]
 sms = ["twilio>=9.0.0"]
 web = ["fastapi>=0.110.0", "uvicorn>=0.29.0"]
+browser = ["cloakbrowser>=0.3.31"]
 all = [
     "discord.py>=2.3.0",
     "python-telegram-bot>=21.0",
@@ -44,6 +45,7 @@ all = [
     "twilio>=9.0.0",
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
+    "cloakbrowser>=0.3.31",
 ]
 
 [dependency-groups]

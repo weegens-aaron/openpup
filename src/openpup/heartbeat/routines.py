@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import List
 
+from openpup import transcripts
 from openpup.agent_host import AgentHost
 from openpup.config import Settings
 from openpup.heartbeat.scheduler import Scheduler
@@ -42,6 +43,12 @@ async def run_due_routines(
             else:
                 # Agent task: run the prompt, deliver the output.
                 logger.info("Running scheduled task '%s'", job.name)
+                # Transcript: "heartbeat:routines:YYYYMMDD" — the job prompt is
+                # user-authored, so it goes in as the 'user' turn.
+                session_id = transcripts.heartbeat_session_id("routines")
+                transcripts.record_turn(
+                    session_id, transcripts.HEARTBEAT_SOURCE, "user", job.prompt
+                )
                 output = (
                     await host.run(
                         job.prompt,
@@ -50,6 +57,9 @@ async def run_due_routines(
                     )
                     or ""
                 ).strip()
+                transcripts.record_turn(
+                    session_id, transcripts.HEARTBEAT_SOURCE, "assistant", output
+                )
                 if output and "[SILENT]" not in output and target:
                     await registry.send(Envelope.to(target, output))
             fired.append(job.name)

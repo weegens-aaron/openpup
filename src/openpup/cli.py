@@ -6,13 +6,13 @@ Commands:
   openpup say <addr> <text>   send a one-off message to a platform address
   openpup memory recall <q>   search the kennel
   openpup memory recent       show recent memories
+  openpup sessions ...        search / browse / replay conversation transcripts
   openpup routine add/list/rm manage scheduled routines
 """
 
 from __future__ import annotations
 
 import asyncio
-import logging
 import signal
 from typing import Optional
 
@@ -24,9 +24,11 @@ from openpup.config import get_settings
 
 app = typer.Typer(help="OpenPup - an always-on AI companion.", no_args_is_help=True)
 memory_app = typer.Typer(help="Inspect OpenPup's memory (puppy_kennel).")
+sessions_app = typer.Typer(help="Search and replay past conversation transcripts.")
 routine_app = typer.Typer(help="Manage scheduled routines.")
 access_app = typer.Typer(help="Manage who can talk to OpenPup (owner + allowlists).")
 app.add_typer(memory_app, name="memory")
+app.add_typer(sessions_app, name="sessions")
 app.add_typer(routine_app, name="routine")
 app.add_typer(access_app, name="access")
 
@@ -34,10 +36,9 @@ console = Console()
 
 
 def _setup_logging(verbose: bool) -> None:
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-    )
+    from openpup.logging_setup import setup_logging
+
+    setup_logging(verbose)
 
 
 @app.command()
@@ -114,7 +115,10 @@ def status() -> None:
     table = Table(title=f"{s.name} status")
     table.add_column("Setting", style="cyan")
     table.add_column("Value", style="white")
-    table.add_row("Agent", s.agent)
+    from openpup.agent_def import is_auto, slugify
+
+    agent_label = f"auto (generated: {slugify(s.name)})" if is_auto(s.agent) else s.agent
+    table.add_row("Agent", agent_label)
     table.add_row("Model", s.model or "(code-puppy default)")
     table.add_row("Reflection model", s.reflection_model or "(same as agent)")
     table.add_row("Universal Constructor", "on" if s.universal_constructor else "off")
@@ -194,6 +198,95 @@ def memory_recent(top_k: int = 5) -> None:
         return
     for i, r in enumerate(results, 1):
         console.print(f"[cyan]{i}.[/cyan] {r}")
+
+
+def _fmt_ts(ts) -> str:
+    from datetime import datetime
+
+    try:
+        return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError, OSError):
+        return "?"
+
+
+@sessions_app.command("search")
+def sessions_search(
+    query: str,
+    limit: int = typer.Option(5, "--limit", help="max sessions to show"),
+) -> None:
+    """Full-text search across transcripts (best hit per session)."""
+    from openpup.sessions import get_session_store
+
+    get_settings()  # ensure state dir env is set
+    hits = get_session_store().search(query, limit=limit)
+    if not hits:
+        console.print("[dim]no matches[/dim]")
+        return
+    table = Table(title=f"Sessions matching {query!r}")
+    table.add_column("session", style="cyan")
+    table.add_column("msg id", style="magenta")
+    table.add_column("role")
+    table.add_column("when", style="dim")
+    table.add_column("snippet", overflow="fold")
+    for h in hits:
+        table.add_row(
+            h["session_id"], str(h["message_id"]), h["role"], _fmt_ts(h["ts"]), h["snippet"]
+        )
+    console.print(table)
+
+
+@sessions_app.command("recent")
+def sessions_recent(
+    limit: int = typer.Option(5, "--limit", help="max sessions to show"),
+) -> None:
+    """Show the most recently active sessions."""
+    from openpup.sessions import get_session_store
+
+    get_settings()
+    sessions = get_session_store().recent_sessions(limit=limit)
+    if not sessions:
+        console.print("[dim]no sessions yet[/dim]")
+        return
+    table = Table(title="Recent sessions")
+    table.add_column("session", style="cyan")
+    table.add_column("source")
+    table.add_column("msgs", justify="right")
+    table.add_column("last active", style="dim")
+    table.add_column("preview", overflow="fold")
+    for s in sessions:
+        table.add_row(
+            s["session_id"],
+            s.get("source") or "?",
+            str(s["message_count"]),
+            _fmt_ts(s["last_active"]),
+            s["preview"],
+        )
+    console.print(table)
+
+
+@sessions_app.command("show")
+def sessions_show(session_id: str) -> None:
+    """Replay one session's transcript (head/tail truncated when huge)."""
+    from openpup.sessions import get_session_store
+
+    get_settings()
+    data = get_session_store().read_session(session_id)
+    if data["session"] is None:
+        console.print(f"[red]session '{session_id}' not found[/red]")
+        raise typer.Exit(1)
+    sess = data["session"]
+    console.print(
+        f"[bold cyan]{sess['id']}[/bold cyan] "
+        f"[dim]({sess.get('source') or '?'}, started {_fmt_ts(sess['started_at'])})[/dim]"
+    )
+    role_styles = {"user": "green", "assistant": "cyan"}
+    for m in data["messages"]:
+        style = role_styles.get(m["role"], "yellow")
+        console.print(
+            f"[dim]{_fmt_ts(m['ts'])}[/dim] [{style}]{m['role']:>9}[/{style}] {m['content']}"
+        )
+    if data["truncated"]:
+        console.print(f"[yellow]... {data['omitted']} middle messages omitted ...[/yellow]")
 
 
 @routine_app.command("list")

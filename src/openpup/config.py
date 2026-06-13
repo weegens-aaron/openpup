@@ -13,11 +13,33 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Load .env once at import so plain os.environ readers (e.g. the kennel) see it.
-load_dotenv()
+# override=True ensures .env values win over inherited-but-empty env vars
+# (e.g. a parent process exporting OPENPUP_OWNER_ADDRESS="").
+load_dotenv(override=True)
+
+def _expand(path: str) -> Path:
+    return Path(os.path.expanduser(os.path.expandvars(path))).resolve()
+
+
+#: Default home for ALL OpenPup state. Override with the OPENPUP_HOME env var.
+DEFAULT_HOME = "~/.openpup"
+
+
+def config_home() -> Path:
+    """OpenPup's config/state directory (single source of truth).
+
+    Resolution order: ``OPENPUP_HOME`` env var, then :data:`DEFAULT_HOME`.
+    Tests can monkeypatch this function; anything computed lazily (state_dir,
+    SOUL.md, skills, ...) follows. Import-time wiring (the kennel root and
+    code-puppy's own dirs below) is snapshotted once, so to move *those* set
+    ``OPENPUP_HOME`` before importing openpup.
+    """
+    return _expand(os.environ.get("OPENPUP_HOME") or DEFAULT_HOME)
+
 
 # IMPORTANT: code-puppy's puppy_kennel reads PUPPY_KENNEL_ROOT at *import time*
 # and does NOT expand ``~``. ``load_dotenv`` leaves a literal "~/.openpup/kennel"
@@ -26,14 +48,35 @@ load_dotenv()
 # kennel), silently sharing memory. So we normalize it to an absolute path here,
 # at OpenPup-config import (which happens before the kennel is ever imported),
 # defaulting to OpenPup's own kennel so the two stay separate.
-_kennel_root = os.environ.get("PUPPY_KENNEL_ROOT") or "~/.openpup/kennel"
-os.environ["PUPPY_KENNEL_ROOT"] = str(
-    Path(os.path.expanduser(os.path.expandvars(_kennel_root))).resolve()
-)
+_kennel_root = os.environ.get("PUPPY_KENNEL_ROOT") or str(config_home() / "kennel")
+os.environ["PUPPY_KENNEL_ROOT"] = str(_expand(_kennel_root))
 
 
-def _expand(path: str) -> Path:
-    return Path(os.path.expanduser(os.path.expandvars(path))).resolve()
+def _redirect_code_puppy_dirs() -> None:
+    """Point the code-puppy SDK's dirs at OpenPup's home, not ~/.code_puppy.
+
+    code_puppy.config snapshots CONFIG_DIR/DATA_DIR/CACHE_DIR/STATE_DIR from
+    the XDG_* env vars at *import time* (appending "code_puppy"). We import it
+    eagerly inside a temporary XDG override so its files land under
+    ``<config_home>/code_puppy/`` -- then restore the env, so agent-spawned
+    subprocesses never inherit hijacked XDG vars.
+    """
+    home = str(config_home())
+    xdg_vars = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME")
+    saved = {v: os.environ.get(v) for v in xdg_vars}
+    try:
+        for v in xdg_vars:
+            os.environ[v] = home
+        import code_puppy.config  # noqa: F401  (snapshots dirs at import)
+    finally:
+        for v, old in saved.items():
+            if old is None:
+                os.environ.pop(v, None)
+            else:
+                os.environ[v] = old
+
+
+_redirect_code_puppy_dirs()
 
 
 class Settings(BaseSettings):
@@ -45,7 +88,10 @@ class Settings(BaseSettings):
 
     # ---- Identity & agent ------------------------------------------------
     name: str = Field("OpenPup", alias="OPENPUP_NAME")
-    agent: str = Field("code-puppy", alias="OPENPUP_AGENT")
+    # "auto" = generate a first-class agent named after the pup (OPENPUP_NAME),
+    # carrying the full code-puppy toolset. Set an explicit code-puppy agent
+    # name to drive that instead.
+    agent: str = Field("auto", alias="OPENPUP_AGENT")
     model: Optional[str] = Field(None, alias="OPENPUP_MODEL")
     reflection_model: Optional[str] = Field(None, alias="OPENPUP_REFLECTION_MODEL")
     # Universal Constructor: let the agent build its own tools at runtime.
@@ -61,14 +107,34 @@ class Settings(BaseSettings):
     # recognized (and reachable) at ANY of these, e.g. "telegram:123,sms:+1555".
     owner_addresses_raw: str = Field("", alias="OPENPUP_OWNER_ADDRESSES")
 
+    @field_validator("owner_address", mode="before")
+    @classmethod
+    def _empty_owner_is_none(cls, v: object) -> object:
+        """Treat blank strings as None so an inherited empty env var doesn't
+        silently disable owner features."""
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
     # ---- Outbound comms governance --------------------------------------
     # open | contacts | owner_only -- who the agent may message.
     send_policy: str = Field("open", alias="OPENPUP_SEND_POLICY")
     # Per-platform outbound message cap per minute (runaway/spam guard).
     send_rate_per_min: int = Field(10, alias="OPENPUP_SEND_RATE_PER_MIN")
 
+    # ---- Inbound security --------------------------------------------------
+    # Scan NON-owner messages for prompt-injection patterns and append an
+    # advisory to the agent's per-message context. Advisory only, never blocks;
+    # owner messages are never scanned.
+    threat_guard: bool = Field(True, alias="OPENPUP_THREAT_GUARD")
+    # Seconds to wait for the owner to answer an approval request
+    # (security.approval). Expired requests are denied by default.
+    approval_timeout_s: int = Field(300, alias="OPENPUP_APPROVAL_TIMEOUT_S")
+
     # ---- Memory ----------------------------------------------------------
-    kennel_root: str = Field("~/.openpup/kennel", alias="PUPPY_KENNEL_ROOT")
+    # Default is config_home()/kennel; the import-time normalization above
+    # always sets the env var, so this fallback rarely fires.
+    kennel_root: str = Field("", alias="PUPPY_KENNEL_ROOT")
 
     # ---- Heartbeat -------------------------------------------------------
     heartbeat_enabled: bool = Field(True, alias="OPENPUP_HEARTBEAT_ENABLED")
@@ -83,6 +149,10 @@ class Settings(BaseSettings):
     )
     quiet_hours: Optional[str] = Field("23-7", alias="OPENPUP_QUIET_HOURS")
     outreach_max_per_day: int = Field(4, alias="OPENPUP_OUTREACH_MAX_PER_DAY")
+    # Curator: skill-shelf maintenance (opt-in via OPENPUP_HEARTBEAT_BEHAVIORS).
+    curator_interval_hours: int = Field(168, alias="OPENPUP_CURATOR_INTERVAL_HOURS")
+    curator_stale_after_days: int = Field(30, alias="OPENPUP_CURATOR_STALE_AFTER_DAYS")
+    curator_archive_after_days: int = Field(90, alias="OPENPUP_CURATOR_ARCHIVE_AFTER_DAYS")
 
     # ---- Webhook server --------------------------------------------------
     web_enabled: bool = Field(False, alias="OPENPUP_WEB_ENABLED")
@@ -112,7 +182,8 @@ class Settings(BaseSettings):
     email_smtp_port: int = Field(587, alias="EMAIL_SMTP_PORT")
     email_username: Optional[str] = Field(None, alias="EMAIL_USERNAME")
     email_password: Optional[str] = Field(None, alias="EMAIL_PASSWORD")
-    email_poll_seconds: int = Field(60, alias="EMAIL_POLL_SECONDS")
+    # Email is a read-only sensor (no inbound polling); there is no poll
+    # interval. Use a scheduled openpup_check_email job to watch the inbox.
 
     # ---- iMessage (macOS native) ----------------------------------------
     imessage_enabled: bool = Field(False, alias="IMESSAGE_ENABLED")
@@ -128,11 +199,13 @@ class Settings(BaseSettings):
     # ---- Derived helpers -------------------------------------------------
     @property
     def kennel_path(self) -> Path:
-        return _expand(self.kennel_root)
+        if self.kennel_root:
+            return _expand(self.kennel_root)
+        return config_home() / "kennel"
 
     @property
     def state_dir(self) -> Path:
-        d = _expand("~/.openpup")
+        d = config_home()
         d.mkdir(parents=True, exist_ok=True)
         return d
 

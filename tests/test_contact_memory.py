@@ -15,16 +15,22 @@ def test_contact_wing_naming():
     assert memory.contact_wing("sms:+15551112222") == "contact:sms:+15551112222"
 
 
+def _pup() -> OpenPup:
+    from openpup.config import Settings
+
+    return OpenPup(settings=Settings(_env_file=None))
+
+
 def test_context_prefix_owner():
     env = Envelope(platform="telegram", channel="1", sender="Mike", text="hi")
-    prefix = OpenPup._context_prefix(env, access.OWNER)
+    prefix = _pup()._context_prefix(env, access.OWNER)
     assert "OWNER" in prefix
 
 
 def test_context_prefix_non_owner_injects_memory(monkeypatch):
     monkeypatch.setattr(memory, "recent_about_contact", lambda addr, top_k=3: ["likes coffee"])
     env = Envelope(platform="telegram", channel="9", sender="Sara", text="yo")
-    prefix = OpenPup._context_prefix(env, access.ALLOWED)
+    prefix = _pup()._context_prefix(env, access.ALLOWED)
     assert "NON-owner" in prefix
     assert "What you remember about Sara" in prefix
     assert "likes coffee" in prefix
@@ -33,7 +39,7 @@ def test_context_prefix_non_owner_injects_memory(monkeypatch):
 def test_context_prefix_no_memory(monkeypatch):
     monkeypatch.setattr(memory, "recent_about_contact", lambda addr, top_k=3: [])
     env = Envelope(platform="telegram", channel="9", sender="Sara", text="yo")
-    prefix = OpenPup._context_prefix(env, access.ALLOWED)
+    prefix = _pup()._context_prefix(env, access.ALLOWED)
     assert "What you remember" not in prefix
 
 

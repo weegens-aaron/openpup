@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set
@@ -47,8 +47,22 @@ MODES = (MODE_OPEN, MODE_ALLOWLIST, MODE_OWNER_ONLY)
 _current_role: ContextVar[str] = ContextVar("openpup_current_role", default=ALLOWED)
 
 
-def set_current_role(role: str) -> None:
-    _current_role.set(role)
+def set_current_role(role: str) -> "Token[str]":
+    """Set the active sender role; returns a token for :func:`reset_current_role`."""
+    return _current_role.set(role)
+
+
+def reset_current_role(token: "Token[str]") -> None:
+    """Restore the role saved by :func:`set_current_role`.
+
+    Callers that serve one message inside a longer-lived task (heartbeat
+    inbound polling) MUST restore, or the message's role leaks into
+    whatever that task does next.
+    """
+    try:
+        _current_role.reset(token)
+    except Exception:  # token from another context — never worth crashing over
+        logger.debug("could not reset role contextvar", exc_info=True)
 
 
 def get_current_role() -> str:

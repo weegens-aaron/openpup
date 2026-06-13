@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from openpup import memory
+from openpup import memory, transcripts
 from openpup.agent_host import AgentHost
 from openpup.config import Settings
 from openpup.messaging.envelope import Envelope
@@ -128,6 +128,14 @@ async def maybe_reach_out(
         _record_sent(settings)
         memory.remember(
             f"[outreach -> {address}] {message}", wing=memory.AGENT_WING, room="outreach"
+        )
+        # Transcript: "heartbeat:outreach:YYYYMMDD" records only what was actually
+        # sent — STAY QUIET decisions and prompt boilerplate are not worth keeping.
+        transcripts.record_turn(
+            transcripts.heartbeat_session_id("outreach"),
+            transcripts.HEARTBEAT_SOURCE,
+            "assistant",
+            f"[to {address}] {message}",
         )
         logger.info("Proactively reached out to %s", address)
         return message

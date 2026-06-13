@@ -16,6 +16,22 @@ def test_build_system_prompt_has_layers():
     assert "Current time:" in prompt
 
 
+def test_learning_loop_guidance_present():
+    prompt = prompting.build_system_prompt()
+    assert "# Learning loop" in prompt
+    assert "Persist durable knowledge the moment you learn it" in prompt
+    assert 'openpup_skill(action="create"' in prompt
+    assert 'openpup_skill(action="update"' in prompt
+    assert "openpup_session_search for prior art" in prompt
+
+
+def test_learning_loop_follows_skill_index(monkeypatch):
+    # "check the skill index above" only makes sense if the index IS above.
+    monkeypatch.setattr(prompting, "_skills_block", lambda: "# Skills\n- demo: a demo skill")
+    prompt = prompting.build_system_prompt()
+    assert prompt.index("# Skills") < prompt.index("# Learning loop")
+
+
 def test_load_soul_from_file(tmp_path, monkeypatch):
     monkeypatch.setattr(prompting, "openpup_home", lambda: tmp_path)
     (tmp_path / "SOUL.md").write_text("You are Rex, a very good boy.")

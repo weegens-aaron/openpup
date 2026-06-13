@@ -10,7 +10,7 @@ from typing import Optional
 
 from openpup.agent_host import AgentHost
 from openpup.config import Settings
-from openpup.heartbeat import outreach, reflect, routines
+from openpup.heartbeat import curator, outreach, reflect, routines
 from openpup.heartbeat.scheduler import Scheduler, get_scheduler
 from openpup.messaging.registry import PlatformRegistry
 
@@ -134,9 +134,14 @@ class Heartbeat:
                 outreach.maybe_reach_out(self.host, self.settings, self.registry),
                 "outreach",
             )
+        if "curator" in behaviors:
+            # Opt-in, and internally interval-gated to ~weekly runs.
+            await self._safe(curator.maybe_curate(self.host, self.settings), "curator")
 
     async def _poll_inbound(self) -> None:
-        """Tick poll-based adapters (e.g. email) so they fetch new messages."""
+        """Tick poll-based chat adapters (e.g. iMessage) so they fetch new
+        messages. Email is intentionally excluded: it's a read-only sensor with
+        no ``poll_once``, so it's never crawled here."""
         for adapter in self.registry.adapters():
             poll = getattr(adapter, "poll_once", None)
             if poll is None:

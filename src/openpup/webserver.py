@@ -7,6 +7,11 @@ Only started when ``OPENPUP_WEB_ENABLED=true``. Routes:
 * ``POST /webhook/sms``      — inbound Twilio SMS (form-encoded)
 * ``GET  /healthz``          — liveness probe
 
+SSRF note: OpenPup currently has NO agent-controllable fetch surface — httpx
+lives only in platform adapters (fixed vendor APIs) and the setup wizard's
+validators. Any future tool or route that fetches an arbitrary, caller-supplied
+URL MUST pre-flight it through ``openpup.security.url_safety.check_url`` first.
+
 Note: this module intentionally does NOT use ``from __future__ import
 annotations``. FastAPI must see the real ``Request``/``Response`` classes on
 the route signatures to inject them; stringized annotations resolved against

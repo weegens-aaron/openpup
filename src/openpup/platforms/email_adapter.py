@@ -1,15 +1,31 @@
-"""Email adapter: IMAP polling for inbound, SMTP for outbound.
+"""Email adapter: a ONE-WAY, read-only inbox sensor (+ optional outbound).
 
-Channels are email addresses; the subject line is carried in ``meta`` and
-reused (prefixed ``Re:``) on replies. Polling runs as a background task on the
-configured interval and is also tickable by the heartbeat's inbound behavior.
+Unlike the chat platforms (Telegram/SMS/iMessage/...), email is **not** a
+two-way conversational channel. OpenPup does NOT auto-reply to incoming mail.
+Instead the inbox is a sensor the pup reads on demand -- typically from a
+recurring scheduled job ("check my email every 30m and tell me about new ones
+on topic X"). Notifications go out on the owner's normal channel, not as email
+replies.
+
+What this adapter exposes:
+* ``fetch_recent(limit, only_new)`` -- read recent mail WITHOUT marking it
+  seen. ``only_new=True`` returns only messages newer than the last watched
+  check (watermark-tracked), so a recurring check never re-reports the same
+  email. Used by the ``openpup_check_email`` tool.
+* ``send(envelope)`` -- still available so the owner can explicitly ask the pup
+  to send an email; nothing fires automatically.
+
+There is intentionally no inbound poll loop and no ``poll_once``: the heartbeat
+won't crawl the inbox, and no email ever triggers an unsolicited agent run.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from email.message import EmailMessage
+from pathlib import Path
 from typing import List, Optional
 
 from openpup.config import Settings
@@ -37,65 +53,32 @@ class EmailAdapter(PlatformAdapter):
         import aiosmtplib  # noqa: F401
         from imap_tools import MailBox  # noqa: F401
 
-        self._poll_task: Optional[asyncio.Task] = None
-        self._stop = asyncio.Event()
-
+    # ---- lifecycle -------------------------------------------------------
+    # Email is read-on-demand: no background polling, no inbound dispatch.
     async def start(self) -> None:
-        self._stop.clear()
-        self._poll_task = asyncio.create_task(self._poll_loop())
-        logger.info("Email adapter started (IMAP poll every %ss)", self.settings.email_poll_seconds)
+        logger.info("Email adapter started (read-only inbox sensor; no auto-reply)")
 
     async def stop(self) -> None:
-        self._stop.set()
-        if self._poll_task:
-            self._poll_task.cancel()
         logger.info("Email adapter stopped")
 
-    async def _poll_loop(self) -> None:
-        while not self._stop.is_set():
-            try:
-                await self.poll_once()
-            except Exception:
-                logger.exception("Email poll failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.settings.email_poll_seconds)
-            except asyncio.TimeoutError:
-                pass
+    # ---- read-only inbox -------------------------------------------------
+    async def fetch_recent(self, limit: int = 5, only_new: bool = False) -> List[dict]:
+        """Read recent emails WITHOUT marking them seen (read-only).
 
-    async def poll_once(self) -> List[Envelope]:
-        """Fetch unseen messages, convert to Envelopes, dispatch. Tickable."""
-        envelopes = await asyncio.to_thread(self._fetch_sync)
-        for env in envelopes:
-            await self.registry.dispatch_inbound(env)
-        return envelopes
+        Returns a list of dicts: ``from_addr``, ``subject``, ``date``,
+        ``preview``, ``uid``.
 
-    def _fetch_sync(self) -> List[Envelope]:
-        from imap_tools import AND, MailBox
-
-        envelopes: List[Envelope] = []
-        with MailBox(self.settings.email_imap_host, self.settings.email_imap_port).login(
-            self.settings.email_username, self.settings.email_password
-        ) as mailbox:
-            for msg in mailbox.fetch(AND(seen=False), mark_seen=True):
-                env = Envelope(
-                    platform=self.name,
-                    channel=msg.from_,
-                    sender=msg.from_,
-                    text=msg.text or msg.html or "",
-                    meta={"subject": msg.subject, "message_id": msg.uid},
-                )
-                envelopes.append(env)
-        return envelopes
-
-    async def fetch_recent(self, limit: int = 5) -> List[dict]:
-        """Read the most recent emails WITHOUT marking them seen (read-only).
-
-        Returns a list of dicts: ``from_addr``, ``subject``, ``date``, ``preview``.
-        Used by the ``openpup_check_email`` agent tool.
+        Args:
+            limit: max messages to fetch (newest first).
+            only_new: if True, return only messages newer than the last
+                watched check and advance the watermark. The first-ever
+                watched check just establishes the watermark and returns []
+                ("start watching from now"), so you never get dumped the
+                whole backlog.
         """
-        return await asyncio.to_thread(self._fetch_recent_sync, limit)
+        return await asyncio.to_thread(self._fetch_recent_sync, limit, only_new)
 
-    def _fetch_recent_sync(self, limit: int) -> List[dict]:
+    def _fetch_recent_sync(self, limit: int, only_new: bool) -> List[dict]:
         from imap_tools import MailBox
 
         out: List[dict] = []
@@ -110,10 +93,59 @@ class EmailAdapter(PlatformAdapter):
                         "subject": msg.subject or "",
                         "date": str(msg.date) if msg.date else "",
                         "preview": body[:500],
+                        "uid": msg.uid or "",
                     }
                 )
+        if only_new:
+            out = self._filter_new(out)
         return out
 
+    # ---- "new since last check" watermark --------------------------------
+    def _watermark_path(self) -> Path:
+        return self.settings.state_dir / "email_watermark.json"
+
+    def _load_watermark(self) -> int:
+        try:
+            return int(json.loads(self._watermark_path().read_text()).get("last_uid", 0))
+        except Exception:
+            return 0
+
+    def _save_watermark(self, last_uid: int) -> None:
+        try:
+            self._watermark_path().write_text(json.dumps({"last_uid": last_uid}))
+        except Exception:
+            logger.exception("Failed to persist email watermark")
+
+    def _filter_new(self, items: List[dict]) -> List[dict]:
+        """Keep only items with a UID above the stored watermark, then advance it.
+
+        IMAP UIDs are monotonically increasing within a mailbox, so the max UID
+        seen is a reliable high-water mark. On the very first watched check
+        (no watermark yet) we record the current max and return nothing.
+        """
+        uids = [self._as_int_uid(i.get("uid")) for i in items]
+        max_uid = max([u for u in uids if u is not None], default=0)
+
+        first_run = not self._watermark_path().exists()
+        last_uid = self._load_watermark()
+        if max_uid > last_uid:
+            self._save_watermark(max_uid)
+        if first_run:
+            return []
+        return [
+            item
+            for item, uid in zip(items, uids)
+            if uid is not None and uid > last_uid
+        ]
+
+    @staticmethod
+    def _as_int_uid(uid: object) -> Optional[int]:
+        try:
+            return int(str(uid))
+        except (TypeError, ValueError):
+            return None
+
+    # ---- outbound (explicit only) ----------------------------------------
     async def send(self, envelope: Envelope) -> None:
         import aiosmtplib
 

@@ -43,7 +43,10 @@ SCHEMA: List[Section] = [
         [
             Field("OPENPUP_NAME", "Name", "text", help="Display name for your pup."),
             Field(
-                "OPENPUP_AGENT", "code-puppy agent", "text", help="Which code-puppy agent to drive."
+                "OPENPUP_AGENT",
+                "Agent",
+                "text",
+                help="'auto' = agent named after your pup; or an explicit code-puppy agent name.",
             ),
             Field(
                 "OPENPUP_MODEL", "Model", "model", help="Model name (blank = code-puppy default)."
@@ -133,7 +136,6 @@ SCHEMA: List[Section] = [
             Field("EMAIL_SMTP_PORT", "SMTP port", "number"),
             Field("EMAIL_USERNAME", "Username", "text"),
             Field("EMAIL_PASSWORD", "Password", "secret"),
-            Field("EMAIL_POLL_SECONDS", "Poll interval (seconds)", "number"),
         ],
     ),
     Section(

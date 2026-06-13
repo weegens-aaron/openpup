@@ -35,9 +35,10 @@ agent into a persistent, reachable companion:
 ```
 
 - The agent is code-puppy plus OpenPup's own tools: `openpup_check_email`,
-  `openpup_send_message`, `openpup_list_platforms`, and (optionally) the
-  **Universal Constructor** (`universal_constructor`) so it can build brand-new
-  tools for itself at runtime. So "check my email" or "text my owner" just work.
+  `openpup_send_message`, `openpup_list_platforms`, `openpup_browse` (a
+  stealth browser — see *Platform notes*), and (optionally) the **Universal
+  Constructor** (`universal_constructor`) so it can build brand-new tools for
+  itself at runtime. So "check my email" or "text my owner" just work.
 - Every inbound message becomes a normalized **`Envelope`** and is routed
   through the agent; the reply goes back out on the same channel.
 - The **heartbeat** ticks on a jittered interval and runs whichever behaviors
@@ -164,6 +165,65 @@ from hermes-agent:
 This complements inbound access control: `access.py` governs who may talk to
 OpenPup; `governance.py` governs who OpenPup may message, and how fast.
 
+## Session recall (hermes-style)
+
+Every conversation turn — yours and the heartbeat's — is recorded to a
+transcript store (`~/.openpup/sessions.db`, SQLite + FTS5, same no-daemon
+recipe as memory). Sessions are date-bucketed: `{platform}:{channel}:{YYYYMMDD}`
+per conversation peer, `heartbeat:{behavior}:{YYYYMMDD}` for the pup's own ticks.
+
+```bash
+openpup sessions search "postgres upgrade"        # full-text, best hit per session
+openpup sessions recent                           # recently active sessions
+openpup sessions show telegram:123456:20260214    # replay one transcript
+```
+
+The agent has the same recall via `openpup_session_search` (**owner-only** —
+transcripts are private), so "what did we decide about the deploy last week?"
+just works. The calling shape picks the mode:
+
+| You pass | Mode |
+|----------|------|
+| `query` | **discover** — FTS5 search, best hit per session + surrounding context |
+| `session_id` | **read** — whole transcript (head/tail truncated when huge) |
+| `session_id` + `around_message_id` | **scroll** — ±N messages around an anchor |
+| nothing | **browse** — most recently active sessions |
+
+## Skills & the learning loop (hermes-style)
+
+OpenPup learns *procedures*, not just facts. Skills are
+[agentskills.io](https://agentskills.io)-compatible `SKILL.md` folders under
+`~/.openpup/skills/` (one optional category level; retiring moves a skill to
+`.archive/` — nothing is ever deleted). Progressive disclosure: the system
+prompt carries only each skill's name + description; the full body is loaded
+on demand via the `openpup_skill` tool (`list` / `load` / `create` / `update`
+/ `archive` / `unarchive` / `pin` / `unpin` — mutations owner-only).
+
+The prompt wires in a **learning loop**: finish a non-trivial multi-step task
+→ save the procedure as a skill; using a skill taught you something → fold the
+correction back in; learn a durable fact about the owner → persist it to
+memory. Idle reflection surfaces skill candidates too. So "save what you just
+did as a skill" works — or drop your own skill folders into
+`~/.openpup/skills/` and they're live on the next turn.
+
+An opt-in **curator** heartbeat behavior (add `curator` to
+`OPENPUP_HEARTBEAT_BEHAVIORS`) reviews the shelf roughly weekly and archives
+long-idle *agent-created* skills. Hermes invariants, verbatim: user skills are
+sacred, pinned skills bypass everything, archive only — never delete. Knobs:
+`OPENPUP_CURATOR_INTERVAL_HOURS` / `_STALE_AFTER_DAYS` / `_ARCHIVE_AFTER_DAYS`.
+
+## Security hardening
+
+Defense in depth for an agent that strangers can message:
+
+| Layer | What it does |
+|-------|--------------|
+| Secret redaction (`security/redact.py`) | Deep scrub of tokens / keys / credential URLs from tool errors and outbound text. |
+| Skills guard (`security/skills_guard.py`) | Audits skill bodies + bundled scripts (AST) on every load/create/update. Block findings refuse the skill (only *pinned user-created* skills — explicit owner trust — bypass); warn findings get a caution banner; quarantined skills are dropped from the prompt index. |
+| Threat guard (`OPENPUP_THREAT_GUARD`, default on) | Scans **non-owner** messages for prompt-injection patterns (instruction override, secret fishing, impersonation) and warns the agent inline. Advisory only — never blocks. Owner messages are never scanned. |
+| URL safety (`security/url_safety.check_url`) | SSRF / scheme / private-IP pre-flight for anything fetch-shaped. |
+| Approval gate (`security/approval.py`) | Risky actions ping you: `[approval] <summary> — reply 'yes <id>' or 'no <id>'`. Default-deny: no answer within `OPENPUP_APPROVAL_TIMEOUT_S` (300s) means no. |
+
 ## Scheduler & reminders
 
 OpenPup has a built-in scheduler (no cron dependency) that the heartbeat drives.
@@ -256,11 +316,13 @@ Configured via `OPENPUP_HEARTBEAT_BEHAVIORS` (comma-separated):
 | `reflect`  | Reads recent memory, writes a short private reflection back to memory. |
 | `outreach` | Decides whether to message you unprompted. Guard-railed: quiet hours + daily cap + the agent must explicitly opt in. |
 | `routines` | Runs due scheduled jobs (reminders + tasks) and delivers them (with a `[SILENT]` no-spam escape hatch). |
-| `inbound`  | Polls poll-based adapters (e.g. email IMAP) for new messages. |
+| `inbound`  | Polls poll-based chat adapters (e.g. iMessage) for new messages. (Email is *not* polled — it's a read-only sensor you watch via a scheduled `openpup_check_email` job.) |
+| `curator`  | *(opt-in)* Roughly-weekly maintenance of agent-created skills: archives stale ones (never deletes; pinned bypasses). See *Skills & the learning loop*. |
 
 Tuning knobs (see `.env.example`): `OPENPUP_HEARTBEAT_INTERVAL`,
 `OPENPUP_HEARTBEAT_JITTER`, `OPENPUP_QUIET_HOURS`, `OPENPUP_OUTREACH_MAX_PER_DAY`,
-`OPENPUP_REFLECTION_MODEL` (use a cheap model for ticks).
+`OPENPUP_REFLECTION_MODEL` (use a cheap model for ticks), `OPENPUP_CURATOR_*`
+(curator cadence + staleness thresholds).
 
 ## Platform notes
 
@@ -268,8 +330,26 @@ Tuning knobs (see `.env.example`): `OPENPUP_HEARTBEAT_INTERVAL`,
 - **Telegram** - bot token; long-polling, no public URL needed.
 - **WhatsApp** - Meta Cloud API; requires the webhook server
   (`OPENPUP_WEB_ENABLED=true`) reachable over HTTPS + a verified number.
-- **Email** - IMAP polling in, SMTP out; subject lines are preserved on replies.
+- **Email** - a **one-way, read-only inbox sensor**, *not* a chat channel: the
+  pup never auto-replies to incoming mail. It reads your inbox on demand and
+  from scheduled checks (`openpup_check_email`, which can return only-new mail
+  via a watermark). Ask it to *"check my email every 30m and tell me about new
+  ones on topic X"* and it schedules a recurring job that notifies you on your
+  normal channel. SMTP out still works when you explicitly ask it to send.
 - **SMS** - Twilio; inbound via the webhook server's `/webhook/sms` route.
+
+### Stealth browser (`openpup_browse`)
+
+With the `browser` extra installed (`pip install "openpup[browser]"`), the pup
+gets an `openpup_browse(url)` tool backed by
+[CloakBrowser](https://github.com/CloakHQ/cloakbrowser) — a fingerprint-evading
+Playwright Chromium. Use it to read pages that block plain HTTP clients
+(Cloudflare/Turnstile/DataDome/CAPTCHA walls) or that need JS to render. It's
+**owner-only** and every URL is run through the same SSRF guard
+(`security/url_safety.py`) as the rest of OpenPup, so private/loopback/cloud-
+metadata addresses are refused. The stealth Chromium binary downloads
+automatically on first use. It's heavier than a plain GET — the pup is told to
+reach for it only when a normal fetch would fail.
 
 ## Architecture
 
@@ -279,6 +359,8 @@ src/openpup/
   runtime.py           # boots everything, central async loop
   agent_host.py        # headless code-puppy SDK harness
   memory.py            # facade over puppy_kennel
+  sessions.py          # transcript store (SQLite + FTS5)
+  transcripts.py       # fire-and-forget turn recording, date-bucketed ids
   webserver.py         # FastAPI inbound webhooks (WhatsApp/SMS)
   messaging/
     envelope.py        # normalized message model
@@ -287,10 +369,21 @@ src/openpup/
     base.py            # PlatformAdapter interface + factory
     discord_adapter.py telegram_adapter.py whatsapp_adapter.py
     email_adapter.py   sms_adapter.py
+  skills/
+    store.py           # agentskills.io SKILL.md folders (~/.openpup/skills)
+    tool.py            # openpup_skill: the learning loop's hands
+    loader.py          # skill index block for the system prompt
+  security/
+    redact.py          # deep secret redaction
+    skills_guard.py    # skill body + bundled-script audit
+    threats.py         # inbound prompt-injection advisories
+    url_safety.py      # SSRF / scheme / private-IP checks
+    approval.py        # owner yes/no approval gate
   heartbeat/
     engine.py          # the tick loop
     scheduler.py       # routine scheduling (no cron dep)
     reflect.py outreach.py routines.py
+    curator.py         # opt-in skill-shelf maintenance
   tui/
     select.py          # prompt_toolkit arrow-select + input primitives
     env_store.py       # comment-preserving .env editor

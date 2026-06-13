@@ -123,6 +123,43 @@ async def test_list_and_cancel(temp_sched):
     assert temp_sched.routines == []
 
 
+@pytest.mark.asyncio
+async def test_list_exposes_prompt_for_merge(temp_sched):
+    """list_schedules must surface the prompt so topics can be merged in."""
+    agent = FakeAgent()
+    schedule_tools.register_schedule(agent)
+    schedule_tools.register_list_schedules(agent)
+
+    await agent.tools["openpup_schedule"](
+        None,
+        prompt="check email for: invoices",
+        every_seconds=1800,
+        deliver="telegram:1",
+        name="email-watch",
+    )
+    listed = await agent.tools["openpup_list_schedules"](None)
+    assert listed.jobs[0].kind == "task"
+    assert listed.jobs[0].prompt == "check email for: invoices"
+
+
+@pytest.mark.asyncio
+async def test_reschedule_same_name_updates_in_place(temp_sched):
+    """Re-scheduling with an existing name merges/overwrites, no duplicate."""
+    agent = FakeAgent()
+    schedule_tools.register_schedule(agent)
+
+    await agent.tools["openpup_schedule"](
+        None, prompt="check email for: invoices", every_seconds=1800,
+        deliver="telegram:1", name="email-watch",
+    )
+    await agent.tools["openpup_schedule"](
+        None, prompt="check email for: invoices, flights", every_seconds=1800,
+        deliver="telegram:1", name="email-watch",
+    )
+    assert len(temp_sched.routines) == 1
+    assert temp_sched.routines[0].prompt == "check email for: invoices, flights"
+
+
 def test_advertise():
     assert set(schedule_tools.advertise_tools()) == {
         "openpup_schedule",

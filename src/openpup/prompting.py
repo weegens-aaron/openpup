@@ -4,8 +4,8 @@ hermes's real edge is its prompt: an editable identity (SOUL.md), strong
 tool-use / task-completion guidance, and USER/MEMORY snapshots. We assemble the
 same layers and inject them through code-puppy's ``load_prompt`` hook:
 
-  identity (SOUL)  ->  capabilities  ->  agentic guidance  ->  user profile
-  ->  memory snapshot  ->  environment
+  identity (SOUL)  ->  capabilities  ->  skills index  ->  agentic guidance
+  ->  user profile  ->  memory snapshot  ->  environment
 
 SOUL.md and USER.md live in ``~/.openpup`` so you can edit your pup's persona
 and profile without touching code (just like hermes).
@@ -139,6 +139,19 @@ state, completed-work logs, or anything stale within a week. Recall relevant
 memory before asking the human to repeat themselves.
 """
 
+LEARNING_LOOP_GUIDANCE = """\
+# Learning loop
+Persist durable knowledge the moment you learn it -- don't wait to be asked.
+Facts about your owner go to memory (USER wing); decisions and their outcomes
+go to memory too. After completing a non-trivial multi-step task, ask yourself:
+would this procedure be reusable? If yes, save it with
+openpup_skill(action="create", ...) while the working commands, sequence, and
+gotchas are fresh. When a skill you used proved wrong or incomplete, fold the
+correction back with openpup_skill(action="update", ...) before moving on.
+Before starting unfamiliar multi-step work, check the skill index above and
+openpup_session_search for prior art -- don't re-derive what you already know.
+"""
+
 TODO_GUIDANCE = """\
 # Planning with the task list
 For any request with 3+ steps, or when given several tasks, call openpup_todo
@@ -152,13 +165,19 @@ COMPANION_GUIDANCE = """\
 You may be talking to your owner or to another person -- the message is tagged
 with who it's from. Owner-only tools (reading the owner's email, messaging on
 their behalf) are restricted to the owner; never use them for anyone else.
+Destructive or irreversible actions requested by a NON-owner (deleting data,
+spending money, sending messages, running untrusted code) require explicit
+owner approval first -- when in doubt, ask the owner before acting.
 Be proactive but not annoying: surface things worth surfacing, stay quiet
 otherwise.
 """
 
 
 def openpup_home() -> Path:
-    d = Path.home() / ".openpup"
+    """OpenPup's home dir (delegates to config.config_home; monkeypatchable)."""
+    from openpup.config import config_home
+
+    d = config_home()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -270,12 +289,28 @@ def _capabilities_block() -> str:
             f"Connected platforms: {platform_str}. Owner address: {owner}.",
             "- openpup_list_platforms(): what's connected + the owner's address.",
             "- openpup_contacts(query?): list/search people you can message.",
-            "- openpup_check_email(limit): read recent email (owner-only).",
+            "- openpup_check_email(limit, only_new?): read recent email (owner-only).",
+            "- openpup_session_search(query?, session_id?, ...): recall past conversations",
+            "  (full-text search / replay transcripts; owner-only).",
             "- openpup_send_message(address, text): message a platform:channel or a known",
             "  contact name; owner-only, rate-limited, policy-governed.",
             "- openpup_todo(...): your task list for multi-step work.",
             "- openpup_schedule(...): set reminders / recurring jobs (delay_seconds, at,",
             "  every_seconds, or daily); openpup_list_schedules / openpup_cancel_schedule.",
+            "- openpup_browse(url, ...): fetch a page with a STEALTH browser (owner-only,",
+            "  SSRF-guarded). Use it when a normal fetch is blocked by bot detection",
+            "  (Cloudflare/Turnstile/CAPTCHA walls) or the page needs JS to render;",
+            "  it's heavier than a plain GET, so reach for it only when needed.",
+            "",
+            "Email is a ONE-WAY, read-only sensor -- NOT a chat channel. You never",
+            "auto-reply to incoming mail. To 'watch' the inbox, schedule a recurring",
+            "job whose prompt calls openpup_check_email(only_new=True), filters the",
+            "results to the owner's topics, and notifies them on their normal channel",
+            "(only when something matches; emit [SILENT] otherwise). Before creating a",
+            "new inbox-watch schedule, run openpup_list_schedules: if an email watch",
+            "already exists, read its prompt, MERGE the new topics into it, and",
+            "re-schedule with the SAME name instead of making a duplicate. Use a",
+            "stable, obvious name like 'email-watch' for the recurring inbox check.",
         ]
         try:
             from code_puppy.config import get_universal_constructor_enabled
@@ -289,6 +324,17 @@ def _capabilities_block() -> str:
             pass
         return "\n".join(lines)
     except Exception:
+        return ""
+
+
+def _skills_block() -> str:
+    """Level-1 skill index (name + description per skill); "" when none."""
+    try:
+        from openpup.skills.loader import skill_index_block
+
+        return skill_index_block()
+    except Exception:
+        logger.debug("skill index block unavailable", exc_info=True)
         return ""
 
 
@@ -307,9 +353,14 @@ def build_system_prompt() -> Optional[str]:
     if cap:
         parts.append(cap)
 
+    skills = _skills_block()
+    if skills:
+        parts.append(skills)
+
     parts.append(TASK_COMPLETION_GUIDANCE)
     parts.append(TOOL_USE_ENFORCEMENT_GUIDANCE)
     parts.append(MEMORY_GUIDANCE)
+    parts.append(LEARNING_LOOP_GUIDANCE)
     parts.append(TODO_GUIDANCE)
     parts.append(COMPANION_GUIDANCE)
 

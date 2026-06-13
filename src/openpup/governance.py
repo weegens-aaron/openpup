@@ -8,16 +8,16 @@ OpenPup may send OUT:
 * **Send policy** — ``open`` / ``contacts`` / ``owner_only`` restricts who the
   agent may message (defense in depth even though sends are owner-gated).
 * **Secret redaction** — scrub tokens/keys from tool error text before it ever
-  reaches the model or a chat.
+  reaches the model or a chat (implemented in :mod:`openpup.security.redact`;
+  re-exported here so existing call sites keep working).
 """
 
 from __future__ import annotations
 
-import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, Dict, Optional
+from typing import Deque, Dict, List, Optional, Sequence
 
 # Policies
 POLICY_OPEN = "open"
@@ -26,29 +26,9 @@ POLICY_OWNER_ONLY = "owner_only"
 POLICIES = (POLICY_OPEN, POLICY_CONTACTS, POLICY_OWNER_ONLY)
 
 # --- secret redaction ------------------------------------------------------
-_URL_SECRET_RE = re.compile(
-    r"([?&](?:access_token|api[_-]?key|auth[_-]?token|token|signature|sig)=)([^&#\s]+)",
-    re.IGNORECASE,
-)
-_ASSIGN_SECRET_RE = re.compile(
-    r"\b(access[_-]?token|api[_-]?key|auth[_-]?token|password|secret|signature|sig|token)"
-    r"\s*[=:]\s*([^\s,;]+)",
-    re.IGNORECASE,
-)
-_BEARER_RE = re.compile(r"(Bearer\s+)([A-Za-z0-9._\-]{8,})", re.IGNORECASE)
-# Long opaque tokens (e.g. bot tokens like 123456:AAE...).
-_BOT_TOKEN_RE = re.compile(r"\b\d{6,}:[A-Za-z0-9_\-]{20,}\b")
-
-
-def redact(text: str) -> str:
-    """Scrub likely secrets from a string before surfacing it."""
-    if not text:
-        return text
-    text = _URL_SECRET_RE.sub(lambda m: f"{m.group(1)}***", text)
-    text = _ASSIGN_SECRET_RE.sub(lambda m: f"{m.group(1)}=***", text)
-    text = _BEARER_RE.sub(lambda m: f"{m.group(1)}***", text)
-    text = _BOT_TOKEN_RE.sub("***", text)
-    return text
+# The deep pattern library lives in openpup.security.redact; re-export keeps
+# every existing ``from openpup.governance import redact`` call site working.
+from openpup.security.redact import redact  # noqa: E402,F401
 
 
 # --- rate limiting ---------------------------------------------------------
@@ -91,10 +71,19 @@ class SendPolicy:
         policy: str = POLICY_OPEN,
         per_minute: int = 10,
         owner_address: Optional[str] = None,
+        owner_addresses: Optional[Sequence[str]] = None,
     ) -> None:
         self.policy = policy if policy in POLICIES else POLICY_OPEN
         self.owner_address = owner_address
+        # Build the full set of owner addresses for membership checks.
+        _addrs: List[str] = list(owner_addresses or [])
+        if owner_address and owner_address not in _addrs:
+            _addrs.append(owner_address)
+        self._owner_set: frozenset[str] = frozenset(_addrs)
         self.limiter = RateLimiter(per_minute=per_minute)
+
+    def _is_owner(self, address: str) -> bool:
+        return address in self._owner_set
 
     def check(self, address: str, directory=None, now: Optional[float] = None) -> SendDecision:
         if ":" not in address:
@@ -105,10 +94,10 @@ class SendPolicy:
 
         # recipient policy
         if self.policy == POLICY_OWNER_ONLY:
-            if address != self.owner_address:
+            if not self._is_owner(address):
                 return SendDecision(False, "send policy is owner_only")
         elif self.policy == POLICY_CONTACTS:
-            is_owner = address == self.owner_address
+            is_owner = self._is_owner(address)
             is_known = bool(directory and directory.is_known(platform, channel))
             if not (is_owner or is_known):
                 return SendDecision(
@@ -139,5 +128,6 @@ def get_send_policy() -> SendPolicy:
             policy=s.send_policy,
             per_minute=s.send_rate_per_min,
             owner_address=s.owner_address,
+            owner_addresses=s.owner_addresses,
         )
     return _send_policy

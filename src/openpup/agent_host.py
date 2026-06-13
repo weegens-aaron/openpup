@@ -68,7 +68,7 @@ class AgentHost:
 
     def __init__(
         self,
-        agent_name: str = "code-puppy",
+        agent_name: str = "auto",
         default_model: Optional[str] = None,
         universal_constructor: bool = True,
         max_retries: int = 3,
@@ -94,7 +94,7 @@ class AgentHost:
         # Give the agent OpenPup's own tools + a hermes-style layered identity
         # so it actually uses its integrations and works agentically instead of
         # acting like plain code-puppy. Same hook pattern the kennel uses.
-        from openpup import agent_tools, agentic, prompting, schedule_tools
+        from openpup import agent_tools, agentic, browser_tools, prompting, schedule_tools
 
         prompting.ensure_templates()
 
@@ -106,6 +106,9 @@ class AgentHost:
         # Scheduling tools: reminders + cron-like jobs bound to the scheduler.
         register_callback("register_tools", schedule_tools.register_tools_callback)
         register_callback("register_agent_tools", schedule_tools.advertise_tools)
+        # Stealth browser (CloakBrowser): owner-only, SSRF-guarded page fetches.
+        register_callback("register_tools", browser_tools.register_tools_callback)
+        register_callback("register_agent_tools", browser_tools.advertise_tools)
         # Layered system prompt (SOUL + agentic guidance + user/memory snapshots).
         register_callback("load_prompt", prompting.build_system_prompt)
 
@@ -126,8 +129,14 @@ class AgentHost:
         except Exception:  # startup hooks must never block boot
             logger.debug("startup hooks raised (non-fatal)", exc_info=True)
 
-        self._agent = load_agent(self.agent_name)
-        logger.info("AgentHost booted agent '%s'", self.agent_name)
+        # "auto" generates a first-class agent named after the pup (hermes
+        # style) instead of impersonating stock code-puppy; explicit names
+        # pass straight through.
+        from openpup.agent_def import resolve_agent_name
+
+        effective_name = resolve_agent_name(self.agent_name)
+        self._agent = load_agent(effective_name)
+        logger.info("AgentHost booted agent '%s'", effective_name)
 
     async def shutdown(self) -> None:
         try:

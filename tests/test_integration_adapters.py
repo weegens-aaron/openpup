@@ -301,19 +301,9 @@ class TestEmail:
         assert sent["subject"] == "Re: Question"
         assert sent["kwargs"]["hostname"] == "smtp.x.com"
 
-    @pytest.mark.asyncio
-    async def test_poll_parses_unseen(self, monkeypatch):
-        reg, received = collector()
-        adapter = self._adapter(reg)
+    def _patch_mailbox(self, monkeypatch, messages):
+        """Patch imap_tools.MailBox to return ``messages`` from fetch()."""
         import imap_tools
-
-        fake_msg = SimpleNamespace(
-            from_="sender@x.com",
-            subject="Hi",
-            uid="42",
-            text="email body text",
-            html="",
-        )
 
         class FakeMailbox:
             def __init__(self, host, port):
@@ -329,14 +319,68 @@ class TestEmail:
                 return False
 
             def fetch(self, *a, **k):
-                return [fake_msg]
+                # Read-only sensor must never mark messages seen.
+                assert k.get("mark_seen") is False
+                return list(messages)
 
         monkeypatch.setattr(imap_tools, "MailBox", FakeMailbox)
-        envs = await adapter.poll_once()
-        assert len(envs) == 1
-        assert received[0].channel == "sender@x.com"
-        assert received[0].text == "email body text"
-        assert received[0].meta["subject"] == "Hi"
+
+    def _msg(self, uid, subject="Hi", body="email body text"):
+        return SimpleNamespace(
+            from_="sender@x.com",
+            subject=subject,
+            uid=uid,
+            text=body,
+            html="",
+            date=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_is_one_way_no_poll_once_or_dispatch(self, monkeypatch):
+        """Email is a read-only sensor: no inbound poll loop, no auto-reply."""
+        reg, received = collector()
+        adapter = self._adapter(reg)
+        # Lifecycle is a no-op (no background task) and there is no poll_once.
+        await adapter.start()
+        await adapter.stop()
+        assert not hasattr(adapter, "poll_once")
+        assert received == []  # nothing ever dispatched inbound
+
+    @pytest.mark.asyncio
+    async def test_fetch_recent_read_only(self, monkeypatch):
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        self._patch_mailbox(monkeypatch, [self._msg("42")])
+        items = await adapter.fetch_recent(limit=5)
+        assert len(items) == 1
+        assert items[0]["from_addr"] == "sender@x.com"
+        assert items[0]["subject"] == "Hi"
+        assert items[0]["uid"] == "42"
+
+    @pytest.mark.asyncio
+    async def test_only_new_watermark(self, monkeypatch, tmp_path):
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        monkeypatch.setattr(
+            type(adapter.settings), "state_dir", property(lambda self: tmp_path)
+        )
+
+        # First watched check establishes the watermark, returns nothing.
+        self._patch_mailbox(monkeypatch, [self._msg("42")])
+        assert await adapter.fetch_recent(only_new=True) == []
+
+        # No new mail -> still nothing.
+        self._patch_mailbox(monkeypatch, [self._msg("42")])
+        assert await adapter.fetch_recent(only_new=True) == []
+
+        # A newer UID arrives -> reported exactly once.
+        self._patch_mailbox(monkeypatch, [self._msg("43", subject="New"), self._msg("42")])
+        new = await adapter.fetch_recent(only_new=True)
+        assert [i["uid"] for i in new] == ["43"]
+
+        # Re-checking the same inbox -> nothing new again.
+        self._patch_mailbox(monkeypatch, [self._msg("43", subject="New"), self._msg("42")])
+        assert await adapter.fetch_recent(only_new=True) == []
 
 
 # =============================================================================

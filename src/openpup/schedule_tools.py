@@ -41,6 +41,11 @@ class ScheduledJob(BaseModel):
     when: str
     deliver: str
     enabled: bool
+    # The job's payload, so you can read an existing job's topics/instructions
+    # and update it in place (re-schedule with the same name) instead of
+    # creating a duplicate. One of these is set depending on ``kind``.
+    prompt: str = ""
+    message: str = ""
 
 
 class ScheduleList(BaseModel):
@@ -82,6 +87,12 @@ def register_schedule(agent: Any) -> None:
 
         ``deliver`` is a ``platform:channel`` address or a known contact name;
         defaults to the owner. ``name`` is optional (auto-generated if omitted).
+
+        UPDATING an existing job: pass the SAME ``name`` as an existing job to
+        replace it in place (no duplicate). To merge into a recurring job --
+        e.g. add topics to an existing inbox watch -- first call
+        ``openpup_list_schedules`` to read the job's current ``prompt``, fold
+        the new topics into it, then re-schedule with the same ``name``.
         """
         from openpup.config import get_settings
         from openpup.directory import get_directory
@@ -144,6 +155,8 @@ def register_list_schedules(agent: Any) -> None:
                 when=r.describe_when(),
                 deliver=r.deliver,
                 enabled=r.enabled,
+                prompt=r.prompt,
+                message=r.message,
             )
             for r in sched.routines
         ]

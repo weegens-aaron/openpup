@@ -42,6 +42,8 @@ def test_advertise_and_registry_shape(monkeypatch):
         "openpup_check_email",
         "openpup_list_platforms",
         "openpup_contacts",
+        "openpup_session_search",
+        "openpup_skill",
     }
     # register_tools only defines OpenPup's own tools (not core's UC tool).
     defs = agent_tools.register_tools_callback()
@@ -200,3 +202,34 @@ async def test_list_platforms(monkeypatch):
     agent_tools.register_list_platforms(agent)
     result = await agent.tools["openpup_list_platforms"](None)
     assert set(result.platforms) == {"telegram", "email"}
+
+
+@pytest.mark.asyncio
+async def test_contacts_blocked_for_non_owner(monkeypatch, tmp_path):
+    import openpup.directory as directory_mod
+    from openpup.directory import ContactDirectory
+
+    d = ContactDirectory(tmp_path / "contacts.json")
+    d.record("telegram", "111", "Mike")
+    monkeypatch.setattr(directory_mod, "get_directory", lambda: d)
+    access.set_current_role(access.ALLOWED)  # non-owner
+
+    agent = FakeAgent()
+    agent_tools.register_contacts(agent)
+    out = await agent.tools["openpup_contacts"](None)
+    assert out.count == 0 and not out.contacts
+    assert "owner" in out.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_list_platforms_hides_owner_address_from_non_owner(monkeypatch):
+    reg = PlatformRegistry()
+    reg.register(FakeAdapter("telegram"))
+    monkeypatch.setattr(agent_tools, "get_registry", lambda: reg)
+    access.set_current_role(access.ALLOWED)  # non-owner
+
+    agent = FakeAgent()
+    agent_tools.register_list_platforms(agent)
+    result = await agent.tools["openpup_list_platforms"](None)
+    assert result.platforms == ["telegram"]
+    assert result.owner is None

@@ -182,7 +182,8 @@ FLOWS: List[Flow] = [
         key="email",
         title="Email (IMAP/SMTP)",
         enable_key="EMAIL_ENABLED",
-        intro="Connect a mailbox so OpenPup can read and reply to email. Use an app password.",
+        intro="Connect a mailbox as a read-only inbox sensor. OpenPup reads your "
+        "email (on demand + scheduled checks) but never auto-replies. Use an app password.",
         steps=[
             Step(
                 "For Gmail: enable 2FA, then create an App Password.",

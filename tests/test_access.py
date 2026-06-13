@@ -140,3 +140,14 @@ def test_no_owner_configured(tmp_path):
     # open mode by default -> allowed but not owner
     d = ac.check(_env(channel="111"))
     assert d.allowed and d.role == ALLOWED
+
+
+def test_role_token_save_and_restore():
+    """Per-message role scoping: reset_current_role restores the outer role."""
+    from openpup import access
+
+    access.set_current_role(access.OWNER)
+    token = access.set_current_role(access.ALLOWED)
+    assert access.get_current_role() == access.ALLOWED
+    access.reset_current_role(token)
+    assert access.get_current_role() == access.OWNER

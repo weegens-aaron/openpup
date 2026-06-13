@@ -14,7 +14,7 @@ import asyncio
 import logging
 from typing import List, Optional
 
-from openpup import access, memory
+from openpup import access, memory, transcripts
 from openpup.access import AccessControl, default_access_path
 from openpup.directory import get_directory
 from openpup.agent_host import AgentHost
@@ -23,6 +23,7 @@ from openpup.heartbeat.engine import Heartbeat
 from openpup.messaging.envelope import Envelope
 from openpup.messaging.registry import get_registry
 from openpup.platforms.base import PlatformAdapter, build_enabled_adapters
+from openpup.security import approval, threats
 
 logger = logging.getLogger("openpup.runtime")
 
@@ -73,8 +74,17 @@ class OpenPup:
             )
             return
 
-        access.set_current_role(decision.role)
+        # Scope the sender's role to THIS message: when handle_inbound is
+        # awaited inside a longer-lived task (heartbeat inbound polling), a
+        # leaked role would demote/promote whatever that task does next.
+        role_token = access.set_current_role(decision.role)
+        try:
+            await self._serve(envelope, decision.role)
+        finally:
+            access.reset_current_role(role_token)
 
+    async def _serve(self, envelope: Envelope, role: str) -> None:
+        """Serve one allowed inbound message (role contextvar already set)."""
         # Manual escape hatch: let the owner wipe a stuck conversation's context
         # without restarting the daemon.
         if envelope.text.strip().lower() in ("/reset", "/forget", "/new"):
@@ -82,7 +92,27 @@ class OpenPup:
             await self.registry.send(envelope.reply("Fresh start \U0001f9fc — context cleared."))
             return
 
-        prompt = self._context_prefix(envelope, decision.role) + envelope.text
+        # Approval replies ("yes ab12cd" / "no ab12cd") are control-plane, like
+        # /reset: resolve the pending gate and consume the message — no agent
+        # routing, no transcript. OWNER messages only (trust boundary): a
+        # non-owner can never resolve an approval.
+        if role == access.OWNER:
+            try:
+                confirmation = approval.try_resolve(envelope.text)
+            except Exception:
+                # A broken gate must never block message flow.
+                logger.debug("approval resolution failed", exc_info=True)
+                confirmation = None
+            if confirmation:
+                await self.registry.send(envelope.reply(confirmation))
+                return
+
+        # Transcript: one session per conversation peer, date-bucketed as
+        # "platform:channel:YYYYMMDD" so sessions don't grow unboundedly.
+        session_id = transcripts.conversation_session_id(envelope.address)
+        transcripts.record_turn(session_id, envelope.address, "user", envelope.text)
+
+        prompt = self._context_prefix(envelope, role) + envelope.text
         try:
             reply = await self.host.run(prompt, conversation=envelope.address)
         except Exception as exc:
@@ -94,6 +124,7 @@ class OpenPup:
             else:
                 reply = "Sorry — I hit an error processing that."
 
+        transcripts.record_turn(session_id, envelope.address, "assistant", reply)
         if reply and reply.strip():
             await self.registry.send(envelope.reply(reply))
         # Record the exchange in THIS person's own memory wing, so the pup
@@ -105,8 +136,7 @@ class OpenPup:
             name=envelope.sender,
         )
 
-    @staticmethod
-    def _context_prefix(envelope: Envelope, role: str) -> str:
+    def _context_prefix(self, envelope: Envelope, role: str) -> str:
         """Per-message context: who it's from + what we remember about them."""
         who = envelope.sender or envelope.channel
         if role == access.OWNER:
@@ -117,6 +147,18 @@ class OpenPup:
                 "Be friendly and helpful, but DO NOT use owner-only tools "
                 "(the owner's email, sending on their behalf, their private data).]"
             ]
+            # Threat guard: scan non-owner text for prompt-injection patterns
+            # and warn the agent inline. Advisory only — access modes decide
+            # who may talk; this just keeps the model's guard up. Owner
+            # messages never reach this branch (trust boundary).
+            if self.settings.threat_guard:
+                try:
+                    findings = threats.scan(envelope.text)
+                    if findings:
+                        lines.append(threats.advisory(findings))
+                except Exception:
+                    # A broken guard must never block message flow.
+                    logger.debug("threat scan failed", exc_info=True)
         # Inject what we already know about this specific person.
         try:
             facts = memory.recent_about_contact(envelope.address, top_k=3)
