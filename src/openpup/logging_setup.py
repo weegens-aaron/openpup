@@ -15,32 +15,51 @@ from __future__ import annotations
 import atexit
 import logging
 import threading
+import time
 from typing import Optional
 
 #: Third-party loggers that bark on every HTTP request. WARNING-only, always.
-NOISY_LOGGERS = ("httpx", "httpcore", "hpack", "h2")
+_HTTP_LOGGERS = ("httpx", "httpcore", "hpack", "h2")
+#: Chatty platform SDKs whose INFO lines are noise ("logging in using static
+#: token", "Application started", ...). Keep their warnings/errors, drop INFO.
+_CHAT_LOGGERS = ("discord", "discord.client", "telegram", "telegram.ext")
+#: Everything we clamp to WARNING so it stops spamming INFO at the owner.
+NOISY_LOGGERS = _HTTP_LOGGERS + _CHAT_LOGGERS
 
-_LEVEL_STYLES = {
-    logging.DEBUG: "dim",
-    logging.WARNING: "yellow",
-    logging.ERROR: "bold red",
-    logging.CRITICAL: "bold white on red",
-}
-
-_LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 _DATE_FORMAT = "%H:%M:%S"
+
+# Per-level (label, label-style, message-style). Labels are lowercase + padded
+# so columns line up; structural bits are dim so the MESSAGE is what pops.
+# Color only -- no glyphs/emoji -- so it stays crisp in any terminal.
+_LEVELS = {
+    logging.DEBUG: ("debug", "dim", "dim"),
+    logging.INFO: ("info", "cyan", ""),
+    logging.WARNING: ("warn", "yellow", "yellow"),
+    logging.ERROR: ("error", "bold red", "red"),
+    logging.CRITICAL: ("crit", "bold white on red", "bold red"),
+}
+_DEFAULT_LEVEL = ("log", "", "")
+
+# Exception text is formatted via a bare Formatter (stdlib does the traceback).
+_EXC_FORMATTER = logging.Formatter()
 
 _renderer = None
 _renderer_lock = threading.Lock()
 
 
 class QueueConsoleHandler(logging.Handler):
-    """A logging.Handler that prints through code-puppy's rich console.
+    """A logging.Handler that prints pretty, styled lines through code-puppy's
+    rich console.
 
-    Uses ``rich.text.Text`` (not markup) so log messages containing
-    ``[brackets]`` render literally instead of exploding as rich markup.
-    A re-entrancy guard drops logs emitted *while rendering a log* so a
-    chatty renderer can't feed back into itself.
+    Each record renders as::
+
+        15:06:43  info   registry        Registered platform adapter: discord
+
+    -- dim timestamp, a colored level badge, the dimmed subsystem (the
+    ``openpup.`` prefix is stripped), then the message in a level-appropriate
+    style. Built as a ``rich.text.Text`` with explicit spans (never markup),
+    so messages containing ``[brackets]`` render literally. A re-entrancy
+    guard drops logs emitted *while rendering a log*.
     """
 
     def __init__(self) -> None:
@@ -53,14 +72,33 @@ class QueueConsoleHandler(logging.Handler):
         self._reentry.active = True
         try:
             from code_puppy.tools.common import console
-            from rich.text import Text
 
-            style = _LEVEL_STYLES.get(record.levelno)
-            console.print(Text(self.format(record), style=style or ""))
+            console.print(self._render(record))
         except Exception:
             self.handleError(record)
         finally:
             self._reentry.active = False
+
+    def _render(self, record: logging.LogRecord) -> "object":
+        from rich.text import Text
+
+        label, label_style, msg_style = _LEVELS.get(record.levelno, _DEFAULT_LEVEL)
+        name = record.name
+        if name.startswith("openpup."):
+            name = name[len("openpup.") :]
+
+        line = Text()
+        line.append(time.strftime(_DATE_FORMAT, time.localtime(record.created)), style="dim")
+        line.append("  ")
+        line.append(f"{label:<5}", style=label_style)
+        line.append("  ")
+        line.append(f"{name:<14}", style="dim")
+        line.append(" ")
+        line.append(record.getMessage(), style=msg_style)
+        if record.exc_info:
+            line.append("\n")
+            line.append(_EXC_FORMATTER.formatException(record.exc_info), style="dim red")
+        return line
 
 
 def _ensure_renderer() -> None:
@@ -104,7 +142,9 @@ def setup_logging(verbose: bool, handler: Optional[logging.Handler] = None) -> N
         handler: Override the sink (tests). Defaults to QueueConsoleHandler.
     """
     sink = handler or QueueConsoleHandler()
-    sink.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_DATE_FORMAT))
+    # QueueConsoleHandler composes its own styled output; a format string is
+    # only a courtesy for an override handler passed by tests.
+    sink.setFormatter(logging.Formatter("%(name)s: %(message)s"))
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(sink)
