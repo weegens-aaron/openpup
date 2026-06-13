@@ -28,6 +28,18 @@ def test_openpup_info_passes_and_noisy_info_is_muzzled():
     assert [r.getMessage() for r in h.records] == ["useful"]
 
 
+def test_plugin_child_loggers_muzzled_by_namespace():
+    """Clamping 'code_puppy.plugins' must silence its INFO-spammy children
+    (skill discovery, model loaders) via effective-level inheritance."""
+    h = _setup(verbose=False)
+    logging.getLogger("code_puppy.plugins.agent_skills.discovery").info("Discovered 20 skills")
+    logging.getLogger("code_puppy.plugins.claude_code_oauth.utils").info("Loaded 8 models")
+    assert h.records == []  # all suppressed
+    # ...but a real plugin warning still gets through.
+    logging.getLogger("code_puppy.plugins.agent_skills.discovery").warning("uh oh")
+    assert [r.getMessage() for r in h.records] == ["uh oh"]
+
+
 def test_noisy_warnings_still_bark():
     h = _setup(verbose=False)
     logging.getLogger("httpx").warning("actually important")
