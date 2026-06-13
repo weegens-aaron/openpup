@@ -12,6 +12,7 @@ Tools:
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
@@ -38,9 +39,13 @@ class ScheduleResult(BaseModel):
 class ScheduledJob(BaseModel):
     name: str
     kind: str  # "reminder" | "task"
-    when: str
+    when: str  # the schedule rule, e.g. "every 600s" / "daily 08:00"
     deliver: str
     enabled: bool
+    # Timing visibility so you can answer "when does it next fire / last fire".
+    next_run: str = ""  # human, relative to now: "in ~6m" / "due now" / "never"
+    next_run_at: str = ""  # absolute ISO timestamp of the next fire ("" if none)
+    last_run: str = ""  # ISO timestamp of the last fire, or "never"
     # The job's payload, so you can read an existing job's topics/instructions
     # and update it in place (re-schedule with the same name) instead of
     # creating a duplicate. One of these is set depending on ``kind``.
@@ -143,23 +148,41 @@ def register_schedule(agent: Any) -> None:
 def register_list_schedules(agent: Any) -> None:
     @agent.tool
     async def openpup_list_schedules(context: RunContext) -> ScheduleList:
-        """List pending scheduled reminders and tasks."""
+        """List pending scheduled reminders and tasks, with timing.
+
+        Each job reports its rule (``when``, e.g. "every 600s"), when it will
+        next fire (``next_run`` like "in ~6m" / "due now", plus the absolute
+        ``next_run_at``), and when it ``last_run``. Use this to answer
+        "when's my next email check?" precisely instead of guessing.
+        """
+        import time
+
         from openpup.heartbeat.scheduler import get_scheduler
 
         sched = get_scheduler()
         sched.reload()
-        jobs = [
-            ScheduledJob(
-                name=r.name,
-                kind="reminder" if r.message else "task",
-                when=r.describe_when(),
-                deliver=r.deliver,
-                enabled=r.enabled,
-                prompt=r.prompt,
-                message=r.message,
+        now = time.time()
+        jobs = []
+        for r in sched.routines:
+            nxt = r.next_run(now)
+            jobs.append(
+                ScheduledJob(
+                    name=r.name,
+                    kind="reminder" if r.message else "task",
+                    when=r.describe_when(),
+                    deliver=r.deliver,
+                    enabled=r.enabled,
+                    next_run=r.describe_next(now),
+                    next_run_at=(
+                        datetime.fromtimestamp(nxt).isoformat(timespec="seconds")
+                        if nxt is not None
+                        else ""
+                    ),
+                    last_run=r.describe_last(),
+                    prompt=r.prompt,
+                    message=r.message,
+                )
             )
-            for r in sched.routines
-        ]
         return ScheduleList(jobs=jobs, count=len(jobs))
 
 

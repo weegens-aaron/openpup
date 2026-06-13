@@ -20,11 +20,26 @@ import logging
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
 logger = logging.getLogger("openpup.scheduler")
+
+
+def _human_delta(seconds: float) -> str:
+    """Compact human duration: '45s', '6m', '2h 5m', '3d 4h'."""
+    seconds = int(max(0, seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, sec = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m" if sec == 0 else f"{minutes}m {sec}s"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h" if minutes == 0 else f"{hours}h {minutes}m"
+    days, hours = divmod(hours, 24)
+    return f"{days}d" if hours == 0 else f"{days}d {hours}h"
 
 
 @dataclass
@@ -70,6 +85,48 @@ class Routine:
             if local.hour == hh and local.minute == mm:
                 return (now - self.last_run) > 90  # once per minute window
         return False
+
+    def next_run(self, now: float) -> Optional[float]:
+        """Best estimate of the next fire time (epoch), or None if it won't fire.
+
+        Recurring jobs that have never run (or are already overdue) report
+        ``now`` -- they fire on the next scheduler tick.
+        """
+        if not self.enabled:
+            return None
+        if self.at is not None:
+            return self.at
+        if self.every:
+            if self.last_run <= 0:
+                return now  # fires on the next tick
+            return max(now, self.last_run + self.every)
+        if self.daily:
+            try:
+                hh, mm = (int(x) for x in self.daily.split(":"))
+            except ValueError:
+                return None
+            local = datetime.fromtimestamp(now)
+            candidate = local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if candidate.timestamp() <= now:
+                candidate += timedelta(days=1)
+            return candidate.timestamp()
+        return None
+
+    def describe_next(self, now: float) -> str:
+        """Human 'when it next fires' relative to ``now`` (e.g. 'in ~6m')."""
+        nxt = self.next_run(now)
+        if nxt is None:
+            return "never"
+        delta = nxt - now
+        if delta <= 1:
+            return "due now"
+        return f"in {_human_delta(delta)}"
+
+    def describe_last(self) -> str:
+        """Human 'when it last fired', or 'never'."""
+        if self.last_run <= 0:
+            return "never"
+        return datetime.fromtimestamp(self.last_run).isoformat(timespec="seconds")
 
 
 @dataclass

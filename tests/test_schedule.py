@@ -41,6 +41,39 @@ def test_describe_when():
     assert "daily 08:00" in Routine(name="b", daily="08:00").describe_when()
 
 
+def test_next_run_every_uses_last_run():
+    now = 10_000.0
+    r = Routine(name="a", every=600, last_run=now - 200)
+    assert r.next_run(now) == now + 400  # 600 - 200 left
+    assert r.describe_next(now) == "in 6m 40s"
+
+
+def test_next_run_recurring_never_run_is_due_now():
+    now = 10_000.0
+    r = Routine(name="a", every=600, last_run=0)
+    assert r.next_run(now) == now
+    assert r.describe_next(now) == "due now"
+
+
+def test_next_run_one_shot_is_the_at_time():
+    now = 10_000.0
+    r = Routine(name="a", at=now + 7200)
+    assert r.next_run(now) == now + 7200
+    assert r.describe_next(now) == "in 2h"
+
+
+def test_next_run_disabled_is_none():
+    r = Routine(name="a", every=600, enabled=False)
+    assert r.next_run(123.0) is None
+    assert r.describe_next(123.0) == "never"
+
+
+def test_describe_last():
+    assert Routine(name="a", every=60).describe_last() == "never"
+    fired = Routine(name="a", every=60, last_run=1_700_000_000.0)
+    assert fired.describe_last() != "never" and "T" in fired.describe_last()
+
+
 # ---- agent tools ---------------------------------------------------------
 class FakeAgent:
     def __init__(self):
@@ -140,6 +173,23 @@ async def test_list_exposes_prompt_for_merge(temp_sched):
     listed = await agent.tools["openpup_list_schedules"](None)
     assert listed.jobs[0].kind == "task"
     assert listed.jobs[0].prompt == "check email for: invoices"
+
+
+@pytest.mark.asyncio
+async def test_list_exposes_next_and_last_run(temp_sched):
+    """The pup must be able to answer 'when does it next fire' precisely."""
+    agent = FakeAgent()
+    schedule_tools.register_schedule(agent)
+    schedule_tools.register_list_schedules(agent)
+
+    await agent.tools["openpup_schedule"](
+        None, prompt="check email", every_seconds=600, deliver="telegram:1", name="email-watch"
+    )
+    job = (await agent.tools["openpup_list_schedules"](None)).jobs[0]
+    # Never fired yet -> due on the next tick, and last_run reads 'never'.
+    assert job.next_run == "due now"
+    assert job.last_run == "never"
+    assert job.next_run_at  # absolute ISO timestamp is populated
 
 
 @pytest.mark.asyncio
