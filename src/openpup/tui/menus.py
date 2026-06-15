@@ -1,8 +1,9 @@
 """The OpenPup configuration menu tree (code-puppy style).
 
-``openpup config`` opens the main menu. Sections mirror the ``.env`` layout:
-Identity & Model, Owner & Memory, Heartbeat, and one section per platform plus
-the webhook server. Edits are written back to ``.env``.
+``openpup config`` opens the main menu. Sections cover Identity & Model, Owner
+& Memory, Heartbeat, and one per platform plus the webhook server. Edits are
+saved to the SQLite config store immediately and applied live (no .env, no
+restart for plain settings).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import List, Optional
 
 from rich.console import Console
 
-from openpup.tui.env_store import EnvStore, default_env_path
+from openpup.config_store import ConfigStore, get_config_store
 from openpup.tui.select import arrow_select_async, prompt_text
 
 console = Console()
@@ -167,7 +168,7 @@ SCHEMA: List[Section] = [
 ]
 
 
-def _display_value(store: EnvStore, fld: Field) -> str:
+def _display_value(store: ConfigStore, fld: Field) -> str:
     raw = store.get(fld.key)
     if fld.kind == "bool":
         return "on" if store.get_bool(fld.key) else "off"
@@ -186,7 +187,7 @@ def _available_models() -> List[str]:
         return []
 
 
-async def _edit_field(store: EnvStore, fld: Field) -> None:
+async def _edit_field(store: ConfigStore, fld: Field) -> None:
     if fld.kind == "bool":
         current = store.get_bool(fld.key)
         picked = await arrow_select_async(
@@ -234,7 +235,7 @@ async def _edit_field(store: EnvStore, fld: Field) -> None:
         store.set(fld.key, value.strip())
 
 
-async def _edit_behaviors(store: EnvStore, fld: Field) -> None:
+async def _edit_behaviors(store: ConfigStore, fld: Field) -> None:
     selected = set(b.strip() for b in store.get(fld.key).split(",") if b.strip())
     cursor = 0
     while True:
@@ -257,7 +258,7 @@ async def _edit_behaviors(store: EnvStore, fld: Field) -> None:
     store.set(fld.key, ",".join(ordered))
 
 
-async def _section_menu(store: EnvStore, section: Section) -> None:
+async def _section_menu(store: ConfigStore, section: Section) -> None:
     cursor = 0
     while True:
         labels = [f"{f.label:<24} {_display_value(store, f)}" for f in section.fields]
@@ -281,16 +282,18 @@ async def _section_menu(store: EnvStore, section: Section) -> None:
 
 async def run_config_menu(env_path: Optional[Path] = None) -> None:
     """Entry point: open the interactive configuration menu."""
-    path = default_env_path(env_path)
-    store = EnvStore(path)
-    dirty = False
+    # env_path is accepted for back-compat; config now lives in the SQLite store.
+    store = get_config_store()
     cursor = 0
 
     persona_label = "Persona / Identity (edit SOUL)..."
     roster_label = "Users / Roster (per platform)..."
+    schedules_label = "View scheduled prompts & notifications..."
     while True:
         options = [s.title for s in SCHEMA]
-        options += [persona_label, roster_label, "Save & exit", "Exit without saving"]
+        # Edits persist to the config store immediately (and apply live), so
+        # there's no save/discard step -- just a single way out.
+        options += [persona_label, roster_label, schedules_label, "Done"]
 
         def preview(idx: int) -> str:
             if idx < len(SCHEMA):
@@ -305,25 +308,20 @@ async def run_config_menu(env_path: Optional[Path] = None) -> None:
             return ""
 
         picked = await arrow_select_async(
-            f"OpenPup configuration  ({path})",
+            f"OpenPup configuration  ({store.path})",
             options,
             preview_callback=preview,
             start_index=cursor,
         )
-        if picked is None or picked == "Exit without saving":
-            if dirty:
-                console.print("[yellow]Changes discarded.[/yellow]")
-            return
-        if picked == "Save & exit":
-            store.save()
-            console.print(f"[green]Saved configuration to {path}[/green]")
+        if picked is None or picked == "Done":
+            console.print(f"[green]Config saved live to {store.path}[/green]")
             return
 
         if picked == persona_label:
             from openpup.tui.persona import run_persona_menu
 
-            await run_persona_menu(path)
-            store.load()  # persona editor writes .env itself; reload
+            await run_persona_menu()
+            store.load()  # shared SQLite store; reload is a harmless no-op
             cursor = len(SCHEMA)
             continue
 
@@ -334,7 +332,13 @@ async def run_config_menu(env_path: Optional[Path] = None) -> None:
             cursor = len(SCHEMA) + 1
             continue
 
+        if picked == schedules_label:
+            from openpup.tui.schedules import run_schedules_view
+
+            await run_schedules_view()
+            cursor = len(SCHEMA) + 2
+            continue
+
         cursor = options.index(picked)
         section = SCHEMA[cursor]
         await _section_menu(store, section)
-        dirty = True

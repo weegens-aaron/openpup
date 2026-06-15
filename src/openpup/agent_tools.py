@@ -59,9 +59,29 @@ class EmailList(BaseModel):
     error: Optional[str] = None
 
 
+class DeleteEmailResult(BaseModel):
+    ok: bool
+    deleted: int = 0
+    mode: str = ""  # "trash" | "permanent" | "none"
+    uids: List[str] = Field(default_factory=list)
+    subjects: List[str] = Field(default_factory=list)
+    missing: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
 class PlatformList(BaseModel):
     platforms: List[str]
     owner: Optional[str] = None
+
+
+class ConfigResult(BaseModel):
+    ok: bool
+    action: str = ""
+    key: Optional[str] = None
+    value: Optional[str] = None
+    config: Dict[str, str] = Field(default_factory=dict)
+    note: Optional[str] = None
+    error: Optional[str] = None
 
 
 class Contact(BaseModel):
@@ -177,6 +197,141 @@ def register_check_email(agent: Any) -> None:
         return EmailList(count=len(items), emails=[EmailItem(**i) for i in items])
 
 
+def register_unread_email(agent: Any) -> None:
+    @agent.tool
+    async def openpup_unread_email(context: RunContext, limit: int = 10) -> EmailList:
+        """List the most recent UNREAD emails (read-only, owner-only).
+
+        Returns only messages still marked unread, newest first, and NEVER
+        marks them read just by listing them. Same shape as
+        ``openpup_check_email`` (incl. ``uid``), so a result can feed straight
+        into ``openpup_delete_email``.
+
+        Args:
+            limit: how many unread emails to return (1-50, default 10).
+        """
+        if not _is_owner():
+            return EmailList(count=0, error="Only the owner can read the mailbox.")
+        reg = get_registry()
+        adapter = reg.get("email")
+        if adapter is None:
+            return EmailList(
+                count=0, error="Email is not connected. Set it up with 'openpup setup'."
+            )
+        try:
+            limit = max(1, min(int(limit), 50))
+        except (TypeError, ValueError):
+            limit = 10
+        try:
+            items = await adapter.fetch_unread(limit=limit)  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001 — tools must never raise
+            return EmailList(count=0, error=f"unread_email failed: {exc!r}")
+        return EmailList(count=len(items), emails=[EmailItem(**i) for i in items])
+
+
+def register_search_email(agent: Any) -> None:
+    @agent.tool
+    async def openpup_search_email(
+        context: RunContext,
+        query: Optional[str] = None,
+        from_addr: Optional[str] = None,
+        since_days: Optional[int] = None,
+        limit: int = 10,
+        unread: bool = False,
+    ) -> EmailList:
+        """Search OpenPup's mailbox (read-only, owner-only).
+
+        Finds emails matching the given filters WITHOUT marking anything read.
+        All filters are AND-ed; with none supplied it returns the most recent
+        messages. Returns sender, subject, date, preview, and uid (newest
+        first) -- the same shape as ``openpup_check_email``, so you can feed a
+        result's uid straight into ``openpup_delete_email``.
+
+        Args:
+            query: free text matched against the whole message (subject +
+                headers + body), e.g. ``"invoice"``.
+            from_addr: restrict to a sender substring, e.g. ``"amazon.com"``.
+            since_days: only emails from the last N days.
+            limit: how many to return (1-50, default 10).
+            unread: when True, only UNREAD emails. Combine with the other
+                filters, e.g. unread invoices from amazon in the last week.
+        """
+        if not _is_owner():
+            return EmailList(count=0, error="Only the owner can search the mailbox.")
+        reg = get_registry()
+        adapter = reg.get("email")
+        if adapter is None:
+            return EmailList(
+                count=0, error="Email is not connected. Set it up with 'openpup setup'."
+            )
+        try:
+            limit = max(1, min(int(limit), 50))
+        except (TypeError, ValueError):
+            limit = 10
+        try:
+            items = await adapter.search(  # type: ignore[attr-defined]
+                query=query,
+                from_addr=from_addr,
+                since_days=since_days,
+                limit=limit,
+                unread=bool(unread),
+            )
+        except Exception as exc:  # noqa: BLE001 — tools must never raise
+            return EmailList(count=0, error=f"search_email failed: {exc!r}")
+        return EmailList(count=len(items), emails=[EmailItem(**i) for i in items])
+
+
+def register_delete_email(agent: Any) -> None:
+    @agent.tool
+    async def openpup_delete_email(
+        context: RunContext, uids: List[str], permanent: bool = False
+    ) -> DeleteEmailResult:
+        """Delete specific emails by UID (owner-only).
+
+        SAFE BY DEFAULT: emails are MOVED TO TRASH (reversible). Only pass
+        ``permanent=True`` when the owner explicitly wants them gone forever
+        (irreversible expunge).
+
+        You must pass explicit UIDs -- get them from ``openpup_check_email``
+        (each email it returns includes a ``uid``). There is intentionally no
+        "delete all": only the messages the owner actually identified get
+        touched. UIDs that no longer exist are reported back in ``missing``
+        rather than silently inflating the deleted count.
+
+        Args:
+            uids: the email UIDs to delete (e.g. ``["4123", "4124"]``).
+            permanent: when True, expunge forever instead of moving to trash.
+        """
+        if not _is_owner():
+            return DeleteEmailResult(ok=False, error="Only the owner can delete email.")
+        # Be forgiving about shape: a lone UID string or ints are fine too.
+        if isinstance(uids, (str, int)):
+            uids = [uids]
+        uid_list = [str(u).strip() for u in (uids or []) if str(u).strip()]
+        if not uid_list:
+            return DeleteEmailResult(
+                ok=False, error="No UIDs given. Fetch emails first to get their uid values."
+            )
+        reg = get_registry()
+        adapter = reg.get("email")
+        if adapter is None:
+            return DeleteEmailResult(
+                ok=False, error="Email is not connected. Set it up with 'openpup setup'."
+            )
+        try:
+            res = await adapter.delete(uid_list, permanent=bool(permanent))  # type: ignore[attr-defined]
+        except Exception as exc:  # noqa: BLE001 — tools must never raise
+            return DeleteEmailResult(ok=False, error=f"delete_email failed: {exc!r}")
+        return DeleteEmailResult(
+            ok=True,
+            deleted=int(res.get("deleted", 0)),
+            mode=str(res.get("mode", "")),
+            uids=list(res.get("uids", [])),
+            subjects=list(res.get("subjects", [])),
+            missing=list(res.get("missing", [])),
+        )
+
+
 def register_list_platforms(agent: Any) -> None:
     @agent.tool
     async def openpup_list_platforms(context: RunContext) -> PlatformList:
@@ -188,6 +343,95 @@ def register_list_platforms(agent: Any) -> None:
         reg = get_registry()
         owner = get_settings().owner_address if _is_owner() else None
         return PlatformList(platforms=reg.platforms(), owner=owner)
+
+
+def register_config(agent: Any) -> None:
+    @agent.tool
+    async def openpup_config(
+        context: RunContext,
+        action: str = "list",
+        key: Optional[str] = None,
+        value: Optional[str] = None,
+    ) -> ConfigResult:
+        """Read or update OpenPup's own configuration (owner-only).
+
+        Config lives in a SQLite store now -- NOT a .env file. Use this instead
+        of editing files. Setting a value applies live (no file edits), though
+        platform/credential changes still need a restart for the affected
+        adapter to reconnect.
+
+        Actions:
+            - ``list`` (default): show all current config (secrets masked).
+            - ``get``: read one ``key``.
+            - ``set``: set ``key`` to ``value`` (key must be a known setting).
+
+        Keys are the uppercase setting names, e.g. ``OPENPUP_OWNER_ADDRESSES``,
+        ``OPENPUP_SEND_POLICY``, ``EMAIL_TRASH_FOLDER``. Secret values
+        (passwords/tokens) are masked when displayed but can still be set.
+        """
+        if not _is_owner():
+            return ConfigResult(ok=False, error="Only the owner can read or change config.")
+        try:
+            from openpup.config_store import (
+                get_config_store,
+                is_secret_key,
+                known_config_keys,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return ConfigResult(ok=False, error=f"config store unavailable: {exc!r}")
+
+        def _mask(k: str, v: str) -> str:
+            if v and is_secret_key(k):
+                return "***set***"
+            return v
+
+        store = get_config_store()
+        act = (action or "list").strip().lower()
+
+        if act == "list":
+            data = {k: _mask(k, v) for k, v in sorted(store.as_dict().items())}
+            return ConfigResult(ok=True, action="list", config=data)
+
+        if act == "get":
+            if not key:
+                return ConfigResult(ok=False, action="get", error="get requires a key.")
+            raw = store.get(key)
+            return ConfigResult(
+                ok=True, action="get", key=key, value=_mask(key, raw) if raw else None
+            )
+
+        if act == "set":
+            if not key:
+                return ConfigResult(ok=False, action="set", error="set requires a key.")
+            if value is None:
+                return ConfigResult(ok=False, action="set", error="set requires a value.")
+            valid = known_config_keys()
+            if key not in valid:
+                return ConfigResult(
+                    ok=False,
+                    action="set",
+                    key=key,
+                    error=(
+                        f"Unknown config key {key!r}. Known keys include: "
+                        f"{', '.join(sorted(valid))}."
+                    ),
+                )
+            store.set(key, str(value))
+            return ConfigResult(
+                ok=True,
+                action="set",
+                key=key,
+                value=_mask(key, str(value)),
+                note=(
+                    "Saved to the config store and applied live. Platform or "
+                    "credential changes may need a restart for that adapter to "
+                    "reconnect."
+                ),
+            )
+
+        return ConfigResult(
+            ok=False, action=act, error=f"Unknown action {act!r}. Use list, get, or set."
+        )
 
 
 def register_contacts(agent: Any) -> None:
@@ -335,7 +579,11 @@ def register_session_search(agent: Any) -> None:
 _TOOL_NAMES = (
     "openpup_send_message",
     "openpup_check_email",
+    "openpup_unread_email",
+    "openpup_search_email",
+    "openpup_delete_email",
     "openpup_list_platforms",
+    "openpup_config",
     "openpup_contacts",
     "openpup_session_search",
     SKILL_TOOL_NAME,
@@ -347,7 +595,11 @@ def register_tools_callback() -> List[dict]:
     return [
         {"name": "openpup_send_message", "register_func": register_send_message},
         {"name": "openpup_check_email", "register_func": register_check_email},
+        {"name": "openpup_unread_email", "register_func": register_unread_email},
+        {"name": "openpup_search_email", "register_func": register_search_email},
+        {"name": "openpup_delete_email", "register_func": register_delete_email},
         {"name": "openpup_list_platforms", "register_func": register_list_platforms},
+        {"name": "openpup_config", "register_func": register_config},
         {"name": "openpup_contacts", "register_func": register_contacts},
         {"name": "openpup_session_search", "register_func": register_session_search},
         {"name": SKILL_TOOL_NAME, "register_func": register_skill_tool},

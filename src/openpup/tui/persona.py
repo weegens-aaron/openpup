@@ -17,7 +17,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from openpup import prompting
-from openpup.tui.env_store import EnvStore, default_env_path
+from openpup.config_store import get_config_store
 from openpup.tui.select import arrow_select_async, confirm, prompt_text
 
 console = Console()
@@ -55,8 +55,8 @@ async def _pick(title: str, presets: dict, labels: dict, current: str) -> Option
 
 
 async def run_persona_menu(env_path: Optional[Path] = None) -> None:
-    path = default_env_path(env_path)
-    store = EnvStore(path)
+    # env_path is accepted for back-compat; config now lives in the SQLite store.
+    store = get_config_store()
 
     name = store.get("OPENPUP_NAME") or "OpenPup"
     personality = store.get("OPENPUP_PERSONALITY") or prompting.DEFAULT_PERSONALITY

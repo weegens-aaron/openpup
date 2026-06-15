@@ -290,22 +290,19 @@ def sessions_show(session_id: str) -> None:
 
 
 @routine_app.command("list")
-def routine_list() -> None:
-    """List scheduled jobs (reminders + tasks)."""
-    from openpup.heartbeat.scheduler import Scheduler
+def routine_list(
+    full: bool = typer.Option(
+        False, "--full", "-f", help="Show full prompt/notification text (no truncation)."
+    ),
+) -> None:
+    """View scheduled prompts (tasks) and notifications (reminders).
 
-    s = get_settings()
-    sched = Scheduler.load(s.state_dir / "routines.json")
-    if not sched.routines:
-        console.print("[dim]no scheduled jobs[/dim]")
-        return
-    table = Table(title="Scheduled jobs")
-    for col in ("name", "kind", "when", "deliver", "enabled"):
-        table.add_column(col)
-    for r in sched.routines:
-        kind = "reminder" if r.message else "task"
-        table.add_row(r.name, kind, r.describe_when(), r.deliver or "(owner)", str(r.enabled))
-    console.print(table)
+    Shows each job's timing, next/last fire, delivery target, and its actual
+    content. Use --full to see untruncated prompt/message text.
+    """
+    from openpup.tui.schedules import render_schedules
+
+    render_schedules(console, full=full)
 
 
 @routine_app.command("add")
@@ -367,19 +364,17 @@ def access_owner(
         True, "--primary/--add", help="--primary sets the default outreach target; --add only adds."
     ),
 ) -> None:
-    """Add/set an owner address (platform:channel), written to .env.
+    """Add/set an owner address (platform:channel), saved to the config store.
 
     The owner can be reachable on several platforms (telegram + sms + ...). Use
     ``--add`` to register an extra one without changing your primary address.
     """
-    from pathlib import Path
-
-    from openpup.tui.env_store import EnvStore
+    from openpup.config_store import get_config_store
 
     if ":" not in address:
         console.print("[red]Address must be 'platform:channel', e.g. sms:+15559876543[/red]")
         raise typer.Exit(1)
-    store = EnvStore(Path.cwd() / ".env")
+    store = get_config_store()
     if primary or not store.get("OPENPUP_OWNER_ADDRESS"):
         store.set("OPENPUP_OWNER_ADDRESS", address)
     existing = [a.strip() for a in store.get("OPENPUP_OWNER_ADDRESSES").split(",") if a.strip()]

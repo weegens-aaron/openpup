@@ -288,8 +288,19 @@ def _capabilities_block() -> str:
             "# Your OpenPup capabilities",
             f"Connected platforms: {platform_str}. Owner address: {owner}.",
             "- openpup_list_platforms(): what's connected + the owner's address.",
-            "- openpup_contacts(query?): list/search people you can message.",
+            "- openpup_config(action, key?, value?): read/update your OWN config",
+            "  (action=list|get|set). Config lives in a SQLite store -- use this to",
+            "  change settings (owner address, send policy, creds). NEVER hand-edit a",
+            "  .env file; that's the old way. Setting applies live, but platform/",
+            "  credential changes need a restart for that adapter to reconnect.",
+            "- openpup_contacts(query?): list/search people you can message."
             "- openpup_check_email(limit, only_new?): read recent email (owner-only).",
+            "- openpup_unread_email(limit?): most recent UNREAD email; never marks read.",
+            "- openpup_search_email(query?, from_addr?, since_days?, limit?, unread?):"
+            "  read-only mailbox search (unread=True for unseen only); returns uids"
+            "  you can pass to delete. Owner-only."
+            "- openpup_delete_email(uids, permanent?): delete emails by uid; moves to"
+            "  trash by default (reversible), permanent=True expunges. Owner-only."
             "- openpup_session_search(query?, session_id?, ...): recall past conversations",
             "  (full-text search / replay transcripts; owner-only).",
             "- openpup_send_message(address, text): message a platform:channel or a known",
@@ -302,8 +313,10 @@ def _capabilities_block() -> str:
             "  (Cloudflare/Turnstile/CAPTCHA walls) or the page needs JS to render;",
             "  it's heavier than a plain GET, so reach for it only when needed.",
             "",
-            "Email is a ONE-WAY, read-only sensor -- NOT a chat channel. You never",
-            "auto-reply to incoming mail. To 'watch' the inbox, schedule a recurring",
+            "Email is a sensor, NOT a chat channel: you never auto-reply to incoming",
+            "mail, and you only ever delete messages the owner explicitly asks about",
+            "(by uid, default to trash) -- never a bulk 'clear my inbox'. To 'watch'",
+            "the inbox, schedule a recurring"
             "job whose prompt calls openpup_check_email(only_new=True), filters the",
             "results to the owner's topics, and notifies them on their normal channel",
             "(only when something matches; emit [SILENT] otherwise). Before creating a",

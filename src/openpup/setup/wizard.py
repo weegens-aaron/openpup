@@ -16,8 +16,8 @@ from typing import Awaitable, Callable, List, Optional, Tuple
 from rich.console import Console
 from rich.panel import Panel
 
+from openpup.config_store import ConfigStore, get_config_store
 from openpup.setup import validators
-from openpup.tui.env_store import EnvStore, default_env_path
 from openpup.tui.select import arrow_select_async, confirm, prompt_text
 
 console = Console()
@@ -48,7 +48,7 @@ class Flow:
     fields: List[CredField]
     # validator(values: dict) -> (ok, detail)
     validate: Callable[[dict], Awaitable[Tuple[bool, str]]]
-    post_setup: Optional[Callable[[EnvStore, dict], Awaitable[None]]] = None
+    post_setup: Optional[Callable[[ConfigStore, dict], Awaitable[None]]] = None
     needs_tunnel: bool = False
     extra: List[CredField] = field(default_factory=list)
 
@@ -56,7 +56,7 @@ class Flow:
 # --------------------------------------------------------------------------
 # Per-platform flows
 # --------------------------------------------------------------------------
-def _add_owner_address(store: EnvStore, address: str) -> None:
+def _add_owner_address(store: ConfigStore, address: str) -> None:
     """Register ``address`` as an owner identity.
 
     Sets it as the PRIMARY owner address if none is set yet, and always adds it
@@ -71,7 +71,7 @@ def _add_owner_address(store: EnvStore, address: str) -> None:
     store.set("OPENPUP_OWNER_ADDRESSES", ",".join(existing))
 
 
-async def _telegram_post(store: EnvStore, values: dict) -> None:
+async def _telegram_post(store: ConfigStore, values: dict) -> None:
     token = values["TELEGRAM_BOT_TOKEN"]
     console.print(
         "\n[bold]Let's grab your chat id so OpenPup can message you.[/bold]\n"
@@ -90,7 +90,7 @@ async def _telegram_post(store: EnvStore, values: dict) -> None:
         )
 
 
-async def _imessage_post(store: EnvStore, values: dict) -> None:
+async def _imessage_post(store: ConfigStore, values: dict) -> None:
     console.print(
         "\n[bold]What's your iMessage handle?[/bold] The phone number or email "
         "people use to iMessage you (so OpenPup knows it's you and can text you)."
@@ -122,7 +122,7 @@ async def _imessage_post(store: EnvStore, values: dict) -> None:
                 console.print(f"[yellow]Could not send test: {exc}[/yellow]")
 
 
-async def _sms_post(store: EnvStore, values: dict) -> None:
+async def _sms_post(store: ConfigStore, values: dict) -> None:
     console.print(
         "\n[bold]What's YOUR personal mobile number?[/bold] (the one OpenPup should "
         "text and recognize you from -- NOT the Twilio number)."
@@ -282,7 +282,7 @@ FLOWS: List[Flow] = [
 ]
 
 
-def _flow_status(store: EnvStore, flow: Flow) -> str:
+def _flow_status(store: ConfigStore, flow: Flow) -> str:
     if store.get_bool(flow.enable_key):
         return "[configured]"
     if any(store.get(f.key) for f in flow.fields):
@@ -298,7 +298,7 @@ async def _open_url(url: str) -> None:
             console.print(f"[yellow]Couldn't open a browser. Visit: {url}[/yellow]")
 
 
-async def _run_flow(store: EnvStore, flow: Flow) -> None:
+async def _run_flow(store: ConfigStore, flow: Flow) -> None:
     console.print(Panel.fit(f"[bold]{flow.title}[/bold]\n{flow.intro}", border_style="cyan"))
     if flow.needs_tunnel:
         console.print(
@@ -347,8 +347,8 @@ async def _run_flow(store: EnvStore, flow: Flow) -> None:
 
 
 async def run_setup_wizard(env_path: Optional[Path] = None) -> None:
-    path = default_env_path(env_path)
-    store = EnvStore(path)
+    # env_path is accepted for back-compat; config now lives in the SQLite store.
+    store = get_config_store()
 
     console.print(
         Panel.fit(

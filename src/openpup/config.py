@@ -7,6 +7,7 @@ flag so OpenPup runs with whatever subset you configure.
 
 from __future__ import annotations
 
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -182,6 +183,11 @@ class Settings(BaseSettings):
     email_smtp_port: int = Field(587, alias="EMAIL_SMTP_PORT")
     email_username: Optional[str] = Field(None, alias="EMAIL_USERNAME")
     email_password: Optional[str] = Field(None, alias="EMAIL_PASSWORD")
+    # Where openpup_delete_email moves mail by default (reversible). When set
+    # (the default), deletes are a MOVE to this folder; pass permanent=True at
+    # the tool to expunge instead. Set to "" to make plain deletes permanent.
+    # Folder names vary by provider (e.g. Gmail uses "[Gmail]/Trash").
+    email_trash_folder: Optional[str] = Field("Trash", alias="EMAIL_TRASH_FOLDER")
     # Email is a read-only sensor (no inbound polling); there is no poll
     # interval. Use a scheduled openpup_check_email job to watch the inbox.
 
@@ -251,9 +257,27 @@ class Settings(BaseSettings):
         return None
 
 
+logger = logging.getLogger("openpup.config")
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Return the process-wide settings singleton."""
+    """Return the process-wide settings singleton.
+
+    Config lives in a SQLite store (``config_home()/config.db``). We run a
+    one-time ``.env`` migration, then inject the stored values into
+    ``os.environ`` so Settings reads the DB as the source of truth. The store
+    is best-effort: any failure falls back to plain env/.env loading so the
+    pup always boots.
+    """
+    try:
+        from openpup.config_store import get_config_store
+
+        store = get_config_store()
+        store.bootstrap()
+        store.apply_to_environ()
+    except Exception:
+        logger.exception("config store unavailable; using env/.env only")
     settings = Settings()
     # Force the kennel at OpenPup's (expanded, absolute) root. Force-set rather
     # than setdefault so a literal-tilde value from .env can't win.

@@ -393,6 +393,225 @@ class TestEmail:
         self._patch_mailbox(monkeypatch, [self._msg("43", subject="New"), self._msg("42")])
         assert await adapter.fetch_recent(only_new=True) == []
 
+    def _patch_search_mailbox(self, monkeypatch, messages):
+        """Patch imap_tools for search: capture the criteria passed to fetch()."""
+        import imap_tools
+
+        record = {"criteria": None, "kwargs": None}
+        # Collapse AND(**kw) to the kwargs dict so we can assert on the filters.
+        monkeypatch.setattr(imap_tools, "AND", lambda **kw: kw)
+
+        class FakeMailbox:
+            def __init__(self, host, port):
+                pass
+
+            def login(self, user, pw):
+                return self
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def fetch(self, criteria=None, **k):
+                record["criteria"] = criteria
+                record["kwargs"] = k
+                assert k.get("mark_seen") is False  # search never marks seen
+                return list(messages)
+
+        monkeypatch.setattr(imap_tools, "MailBox", FakeMailbox)
+        return record
+
+    @pytest.mark.asyncio
+    async def test_search_builds_criteria_and_maps_items(self, monkeypatch):
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        record = self._patch_search_mailbox(
+            monkeypatch, [self._msg("7", subject="Invoice")]
+        )
+        items = await adapter.search(query="invoice", from_addr="amazon.com", limit=5)
+        assert [i["uid"] for i in items] == ["7"]
+        assert items[0]["subject"] == "Invoice"
+        assert record["criteria"] == {"text": "invoice", "from_": "amazon.com"}
+        assert record["kwargs"]["limit"] == 5
+        assert record["kwargs"]["reverse"] is True
+
+    @pytest.mark.asyncio
+    async def test_search_unread_adds_seen_false(self, monkeypatch):
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        record = self._patch_search_mailbox(monkeypatch, [self._msg("7")])
+        await adapter.search(query="invoice", unread=True)
+        assert record["criteria"] == {"text": "invoice", "seen": False}
+
+    @pytest.mark.asyncio
+    async def test_search_unread_only_no_other_filters(self, monkeypatch):
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        record = self._patch_search_mailbox(monkeypatch, [self._msg("7")])
+        await adapter.search(unread=True)
+        assert record["criteria"] == {"seen": False}
+
+    @pytest.mark.asyncio
+    async def test_search_since_days_sets_date_filter(self, monkeypatch):
+        import datetime as _dt
+
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        record = self._patch_search_mailbox(monkeypatch, [])
+        await adapter.search(since_days=3)
+        assert "date_gte" in record["criteria"]
+        expected = _dt.date.today() - _dt.timedelta(days=3)
+        assert record["criteria"]["date_gte"] == expected
+
+    @pytest.mark.asyncio
+    async def test_search_no_filters_returns_recent(self, monkeypatch):
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        record = self._patch_search_mailbox(monkeypatch, [self._msg("1"), self._msg("2")])
+        items = await adapter.search()
+        assert len(items) == 2
+        # No filters -> AND(all=True) -> the "ALL" criteria.
+        assert record["criteria"] == {"all": True}
+
+    @pytest.mark.asyncio
+    async def test_fetch_unread_uses_seen_false_and_maps(self, monkeypatch):
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        record = self._patch_search_mailbox(
+            monkeypatch, [self._msg("3", subject="Unseen")]
+        )
+        items = await adapter.fetch_unread(limit=7)
+        assert [i["uid"] for i in items] == ["3"]
+        # Filters to unread only, newest first, and never marks seen.
+        assert record["criteria"] == {"seen": False}
+        assert record["kwargs"]["limit"] == 7
+        assert record["kwargs"]["reverse"] is True
+
+    def _patch_delete_mailbox(self, monkeypatch, messages, folders=(("INBOX", ()), ("Trash", ()))):
+        """Patch imap_tools for delete: fetch filters by uid, record move/delete.
+
+        ``folders`` is a list of ``(name, flags)`` advertised by the fake
+        server, so trash-folder resolution can be exercised.
+        """
+        import imap_tools
+
+        record = {"moved": None, "deleted": None, "move_folder": None}
+        # Make AND(uid=...) collapse to just the requested uid list so the fake
+        # fetch can filter on it without parsing IMAP query syntax.
+        monkeypatch.setattr(imap_tools, "AND", lambda **kw: kw.get("uid", []))
+
+        folder_infos = [SimpleNamespace(name=n, flags=f) for n, f in folders]
+
+        class FakeFolderManager:
+            def list(self):
+                return list(folder_infos)
+
+        class FakeMailbox:
+            folder = FakeFolderManager()
+
+            def __init__(self, host, port):
+                pass
+
+            def login(self, user, pw):
+                return self
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def fetch(self, criteria=None, **k):
+                wanted = set(criteria or [])
+                return [m for m in messages if m.uid in wanted]
+
+            def move(self, uids, folder):
+                record["moved"] = list(uids)
+                record["move_folder"] = folder
+
+            def delete(self, uids):
+                record["deleted"] = list(uids)
+
+        monkeypatch.setattr(imap_tools, "MailBox", FakeMailbox)
+        return record
+
+    @pytest.mark.asyncio
+    async def test_delete_moves_to_trash_by_default(self, monkeypatch):
+        reg, _ = collector()
+        adapter = self._adapter(reg)  # EMAIL_TRASH_FOLDER defaults to "Trash"
+        record = self._patch_delete_mailbox(
+            monkeypatch, [self._msg("10", subject="Spam"), self._msg("11", subject="More")]
+        )
+        # Ask to delete one real uid and one stale uid.
+        res = await adapter.delete(["10", "999"])
+        assert res["mode"] == "trash"
+        assert res["deleted"] == 1
+        assert res["uids"] == ["10"]
+        assert res["subjects"] == ["Spam"]
+        assert res["missing"] == ["999"]
+        # Reversible path used; nothing permanently expunged.
+        assert record["moved"] == ["10"]
+        assert record["move_folder"] == "Trash"
+        assert record["deleted"] is None
+
+    @pytest.mark.asyncio
+    async def test_delete_autodetects_gmail_trash(self, monkeypatch):
+        """Configured 'Trash' doesn't exist on Gmail; resolve via \\Trash flag."""
+        reg, _ = collector()
+        adapter = self._adapter(reg)  # EMAIL_TRASH_FOLDER defaults to "Trash"
+        record = self._patch_delete_mailbox(
+            monkeypatch,
+            [self._msg("10", subject="Spam")],
+            folders=[
+                ("INBOX", ("\\HasNoChildren",)),
+                ("[Gmail]/Trash", ("\\HasNoChildren", "\\Trash")),
+            ],
+        )
+        res = await adapter.delete(["10"])
+        assert res["mode"] == "trash"
+        # Did NOT blindly use "Trash"; followed the \Trash special-use flag.
+        assert record["move_folder"] == "[Gmail]/Trash"
+
+    @pytest.mark.asyncio
+    async def test_delete_raises_clear_error_when_no_trash(self, monkeypatch):
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        self._patch_delete_mailbox(
+            monkeypatch,
+            [self._msg("10")],
+            folders=[("INBOX", ()), ("Archive", ())],
+        )
+        with pytest.raises(ValueError) as exc:
+            await adapter.delete(["10"])
+        # Error is actionable: names the real folders + the permanent escape hatch.
+        assert "EMAIL_TRASH_FOLDER" in str(exc.value)
+        assert "Archive" in str(exc.value)
+        assert "permanent" in str(exc.value)
+
+    @pytest.mark.asyncio
+    async def test_delete_permanent_expunges(self, monkeypatch):
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        record = self._patch_delete_mailbox(monkeypatch, [self._msg("10", subject="Spam")])
+        res = await adapter.delete(["10"], permanent=True)
+        assert res["mode"] == "permanent"
+        assert res["deleted"] == 1
+        assert record["deleted"] == ["10"]
+        assert record["moved"] is None
+
+    @pytest.mark.asyncio
+    async def test_delete_nothing_when_no_match(self, monkeypatch):
+        reg, _ = collector()
+        adapter = self._adapter(reg)
+        record = self._patch_delete_mailbox(monkeypatch, [self._msg("10")])
+        res = await adapter.delete(["999"])
+        assert res["deleted"] == 0
+        assert res["mode"] == "none"
+        assert res["missing"] == ["999"]
+        assert record["moved"] is None and record["deleted"] is None
+
 
 # =============================================================================
 # Webhook server (FastAPI) for WhatsApp + SMS inbound
